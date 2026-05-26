@@ -3,28 +3,57 @@ import { HomeScreen } from './components/HomeScreen';
 import { JoinScreen } from './components/JoinScreen';
 import { HostRoom } from './components/HostRoom';
 import { GuestRoom } from './components/GuestRoom';
+import { storage } from './storage';
 
 type AppState =
   | { screen: 'home' }
-  | { screen: 'hosting'; hostName: string }
+  | { screen: 'hosting'; hostName: string; roomCode?: string }
   | { screen: 'join-form'; roomId: string }
-  | { screen: 'guest'; roomId: string; playerName: string };
+  | { screen: 'guest'; roomId: string; playerName: string; persistentId: string };
 
 function getInitialState(): AppState {
+  // URL param takes priority (shared invite link)
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
   if (room) return { screen: 'join-form', roomId: room };
+
+  // Restore host session if one exists
+  const hostSession = storage.getHost();
+  if (hostSession) {
+    return { screen: 'hosting', hostName: hostSession.hostName, roomCode: hostSession.roomCode };
+  }
+
+  // Restore guest session if one exists
+  const guestSession = storage.getGuest();
+  if (guestSession) {
+    return {
+      screen: 'guest',
+      roomId: guestSession.roomCode,
+      playerName: guestSession.playerName,
+      persistentId: guestSession.persistentId,
+    };
+  }
+
   return { screen: 'home' };
 }
 
 export function App() {
   const [state, setState] = useState<AppState>(getInitialState);
 
+  const goHome = () => setState({ screen: 'home' });
+
   if (state.screen === 'home') {
     return (
       <HomeScreen
         onCreateRoom={(name) => setState({ screen: 'hosting', hostName: name })}
-        onJoinRoom={(code) => setState({ screen: 'join-form', roomId: code })}
+        onJoinRoom={(code, name) =>
+          setState({
+            screen: 'guest',
+            roomId: code,
+            playerName: name,
+            persistentId: crypto.randomUUID(),
+          })
+        }
       />
     );
   }
@@ -34,18 +63,36 @@ export function App() {
       <JoinScreen
         roomId={state.roomId}
         onJoin={(name) =>
-          setState({ screen: 'guest', roomId: state.roomId, playerName: name })
+          setState({
+            screen: 'guest',
+            roomId: state.roomId,
+            playerName: name,
+            persistentId: crypto.randomUUID(),
+          })
         }
       />
     );
   }
 
   if (state.screen === 'hosting') {
-    return <HostRoom hostName={state.hostName} />;
+    return (
+      <HostRoom
+        hostName={state.hostName}
+        roomCode={state.roomCode}
+        onClose={goHome}
+      />
+    );
   }
 
   if (state.screen === 'guest') {
-    return <GuestRoom roomId={state.roomId} playerName={state.playerName} />;
+    return (
+      <GuestRoom
+        roomId={state.roomId}
+        playerName={state.playerName}
+        persistentId={state.persistentId}
+        onLeave={goHome}
+      />
+    );
   }
 
   return null;

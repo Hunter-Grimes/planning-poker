@@ -24,6 +24,7 @@ export function JoinScreen({ roomId, onJoin }: Props) {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && name.trim() && onJoin(name.trim())}
           placeholder="e.g. Bob"
+          maxLength={64}
           className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 border border-gray-700 focus:outline-none focus:border-indigo-500 mb-4"
           autoFocus
         />
