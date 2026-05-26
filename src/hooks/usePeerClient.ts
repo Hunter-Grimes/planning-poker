@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
-import { CardValue, GameState, PeerMessage } from '../types';
+import { CardValue, GameState, PeerMessage, isPeerMessage } from '../types';
 
-export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
 
 export interface UsePeerClientReturn {
   gameState: GameState | null;
@@ -12,7 +12,7 @@ export interface UsePeerClientReturn {
   error: string | null;
 }
 
-export function usePeerClient(roomId: string, playerName: string): UsePeerClientReturn {
+export function usePeerClient(roomId: string, playerName: string, persistentId: string): UsePeerClientReturn {
   const connRef = useRef<DataConnection | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
@@ -30,15 +30,18 @@ export function usePeerClient(roomId: string, playerName: string): UsePeerClient
       connRef.current = conn;
 
       conn.on('open', () => {
-        setStatus('connected');
-        const msg: PeerMessage = { type: 'join', name: playerName };
+        setStatus('pending');
+        const msg: PeerMessage = { type: 'request-join', name: playerName, persistentId };
         conn.send(msg);
       });
 
       conn.on('data', (raw) => {
-        const msg = raw as PeerMessage;
-        if (msg.type === 'state') {
-          setGameState(msg.state);
+        if (!isPeerMessage(raw)) return;
+        if (raw.type === 'state') setGameState(raw.state);
+        if (raw.type === 'approved') setStatus('connected');
+        if (raw.type === 'rejected') {
+          setError(raw.reason);
+          setStatus('error');
         }
       });
 
@@ -57,7 +60,7 @@ export function usePeerClient(roomId: string, playerName: string): UsePeerClient
     return () => {
       peer.destroy();
     };
-  }, [roomId, playerName]);
+  }, [roomId, playerName, persistentId]);
 
   const vote = useCallback((value: CardValue) => {
     if (connRef.current?.open) {

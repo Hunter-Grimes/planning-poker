@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import confetti from 'canvas-confetti';
 import { GameState } from '../types';
 
 interface Props {
@@ -26,6 +28,15 @@ export function ResultsView({ gameState }: Props) {
   const maxFreq = Math.max(...Object.values(freq));
   const consensus = maxFreq === allVotes.length;
 
+  useEffect(() => {
+    if (!consensus) return;
+    confetti({
+      particleCount: 150,
+      spread: 80,
+      origin: { y: 0.6 },
+    });
+  }, [consensus]);
+
   return (
     <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
       <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Results</h3>
@@ -46,10 +57,6 @@ export function ResultsView({ gameState }: Props) {
         <p className="text-gray-300 text-sm">
           Average: <strong className="text-white">{avg.toFixed(1)}</strong>
         </p>
-      )}
-
-      {consensus && (
-        <p className="text-emerald-400 text-sm font-semibold mt-1">Consensus reached!</p>
       )}
     </div>
   );
