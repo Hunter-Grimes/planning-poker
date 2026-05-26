@@ -34,14 +34,9 @@ export function HostRoom({ hostName }: Props) {
     newRound();
   }, [newRound]);
 
-  const shareUrl =
-    roomId && typeof window !== 'undefined'
-      ? `${window.location.origin}${window.location.pathname}?room=${roomId}`
-      : null;
-
-  const copyLink = () => {
-    if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl).then(() => {
+  const copyCode = () => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -89,19 +84,17 @@ export function HostRoom({ hostName }: Props) {
           </span>
         </div>
 
-        {/* Share link */}
-        {shareUrl && (
-          <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6">
-            <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">Invite link</p>
-            <div className="flex items-center gap-2">
-              <span className="flex-1 text-sm text-gray-300 font-mono truncate">{shareUrl}</span>
-              <button
-                onClick={copyLink}
-                className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg transition-colors shrink-0"
-              >
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
+        {/* Join code */}
+        {roomId && (
+          <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 text-center">
+            <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">Room code</p>
+            <p className="text-4xl font-bold font-mono tracking-[0.2em] text-white mb-3">{roomId}</p>
+            <button
+              onClick={copyCode}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-4 py-1.5 rounded-lg transition-colors"
+            >
+              {copied ? 'Copied!' : 'Copy code'}
+            </button>
           </div>
         )}
 
