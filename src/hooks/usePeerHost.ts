@@ -71,6 +71,11 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     phase: 'setup',
   }));
 
+  // Always-current ref so callbacks can read and compute the next state
+  // synchronously without relying on React's async state batching.
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
+
   const broadcast = useCallback((state: GameState) => {
     const msg: PeerMessage = { type: 'state', state };
     connectionsRef.current.forEach((conn) => {
@@ -78,13 +83,14 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     });
   }, []);
 
+  // Compute next state, commit it to the ref immediately, then hand it to
+  // React and broadcast — no side effects inside the setState updater.
   const updateState = useCallback(
     (updater: (prev: GameState) => GameState) => {
-      setGameState((prev) => {
-        const next = updater(prev);
-        broadcast(next);
-        return next;
-      });
+      const next = updater(gameStateRef.current);
+      gameStateRef.current = next;
+      setGameState(next);
+      broadcast(next);
     },
     [broadcast],
   );
@@ -96,20 +102,21 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       peerToPersistentIdRef.current.set(peerId, persistentId);
 
       const newPlayer: Player = { id: peerId, name, vote: null, connected: true };
+      const prev = gameStateRef.current;
+      const next: GameState = {
+        ...prev,
+        players: [...prev.players.filter((p) => p.id !== peerId), newPlayer],
+      };
+      gameStateRef.current = next;
+      setGameState(next);
 
-      setGameState((prev) => {
-        const next: GameState = {
-          ...prev,
-          players: [...prev.players.filter((p) => p.id !== peerId), newPlayer],
-        };
-        if (conn.open) {
-          conn.send({ type: 'approved' } as PeerMessage);
-          conn.send({ type: 'state', state: next } as PeerMessage);
-        }
-        connectionsRef.current.forEach((c) => {
-          if (c.open && c !== conn) c.send({ type: 'state', state: next } as PeerMessage);
-        });
-        return next;
+      // Send outside any React updater so messages are always dispatched exactly once.
+      if (conn.open) {
+        conn.send({ type: 'approved' } as PeerMessage);
+        conn.send({ type: 'state', state: next } as PeerMessage);
+      }
+      connectionsRef.current.forEach((c) => {
+        if (c.open && c !== conn) c.send({ type: 'state', state: next } as PeerMessage);
       });
 
       optionsRef.current.onApprove?.(persistentId, name);
@@ -130,10 +137,12 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
       peer.on('open', (id) => {
         setRoomId(id);
-        setGameState((prev) => ({
-          ...prev,
+        const next: GameState = {
+          ...gameStateRef.current,
           players: [{ id, name: hostName, vote: null, connected: true }],
-        }));
+        };
+        gameStateRef.current = next;
+        setGameState(next);
       });
 
       peer.on('error', (err) => {
@@ -261,16 +270,15 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
   const castHostVote = useCallback(
     (value: CardValue | null) => {
-      setGameState((prev) => {
-        const next: GameState = {
-          ...prev,
-          players: prev.players.map((p) =>
-            p.id === peerRef.current?.id ? { ...p, vote: value } : p,
-          ),
-        };
-        broadcast(next);
-        return next;
-      });
+      const next: GameState = {
+        ...gameStateRef.current,
+        players: gameStateRef.current.players.map((p) =>
+          p.id === peerRef.current?.id ? { ...p, vote: value } : p,
+        ),
+      };
+      gameStateRef.current = next;
+      setGameState(next);
+      broadcast(next);
     },
     [broadcast],
   );
