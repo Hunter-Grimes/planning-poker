@@ -24,6 +24,7 @@ export function App() {
     return (
       <HomeScreen
         onCreateRoom={(name) => setState({ screen: 'hosting', hostName: name })}
+        onJoinRoom={(code) => setState({ screen: 'join-form', roomId: code })}
       />
     );
   }
@@ -31,6 +32,7 @@ export function App() {
   if (state.screen === 'join-form') {
     return (
       <JoinScreen
+        roomId={state.roomId}
         onJoin={(name) =>
           setState({ screen: 'guest', roomId: state.roomId, playerName: name })
         }

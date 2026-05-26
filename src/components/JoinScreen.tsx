@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
 interface Props {
+  roomId: string;
   onJoin: (name: string) => void;
 }
 
-export function JoinScreen({ onJoin }: Props) {
+export function JoinScreen({ roomId, onJoin }: Props) {
   const [name, setName] = useState('');
 
   return (
@@ -13,7 +14,7 @@ export function JoinScreen({ onJoin }: Props) {
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🃏</div>
           <h1 className="text-2xl font-bold text-white">Join Room</h1>
-          <p className="text-gray-400 text-sm mt-1">You've been invited to a planning session</p>
+          <p className="text-3xl font-bold font-mono tracking-[0.2em] text-indigo-400 mt-2">{roomId}</p>
         </div>
 
         <label className="block text-sm font-medium text-gray-300 mb-1">Your name</label>

@@ -10,6 +10,11 @@ export interface UsePeerHostReturn {
   error: string | null;
 }
 
+function generateRoomCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
 export function usePeerHost(hostName: string): UsePeerHostReturn {
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
@@ -40,7 +45,7 @@ export function usePeerHost(hostName: string): UsePeerHostReturn {
   );
 
   useEffect(() => {
-    const peer = new Peer();
+    const peer = new Peer(generateRoomCode());
     peerRef.current = peer;
 
     peer.on('open', (id) => {
