@@ -19,7 +19,7 @@ export function CardDeck({ selected, onSelect, disabled = false }: Props) {
             onClick={() => !disabled && onSelect(card)}
             disabled={disabled}
             className={[
-              'w-16 h-24 rounded-xl text-xl font-bold border-2 transition-all duration-150 select-none',
+              'w-16 h-24 rounded-xl text-xl font-bold border-2 transition-all duration-150 select-none overflow-hidden',
               disabled ? 'cursor-default' : `cursor-pointer hover:scale-105 active:scale-95 ${colors.hover}`,
               isSelected
                 ? `${colors.selected} scale-110`

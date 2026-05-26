@@ -123,79 +123,94 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
   useEffect(() => {
     const code = optionsRef.current.roomCode ?? generateRoomCode();
-    const peer = new Peer(code);
-    peerRef.current = peer;
 
-    peer.on('open', (id) => {
-      setRoomId(id);
-      setGameState((prev) => ({
-        ...prev,
-        players: [{ id, name: hostName, vote: null, connected: true }],
-      }));
-    });
+    function setupPeer(peerId: string) {
+      const peer = new Peer(peerId);
+      peerRef.current = peer;
 
-    peer.on('error', (err) => setError(err.message));
+      peer.on('open', (id) => {
+        setRoomId(id);
+        setGameState((prev) => ({
+          ...prev,
+          players: [{ id, name: hostName, vote: null, connected: true }],
+        }));
+      });
 
-    peer.on('connection', (conn) => {
-      if (connectionsRef.current.size >= MAX_PLAYERS) {
-        conn.on('open', () => {
-          conn.send({ type: 'rejected', reason: 'Room is full' } as PeerMessage);
-          setTimeout(() => conn.close(), 200);
-        });
-        return;
-      }
+      peer.on('error', (err) => {
+        // The requested ID is already registered on the broker — this happens when
+        // React StrictMode double-mounts the effect, or when the host refreshes
+        // before the broker's TTL expires. Retry with a freshly generated code.
+        if ((err as any).type === 'unavailable-id') {
+          peer.destroy();
+          setupPeer(generateRoomCode());
+          return;
+        }
+        setError(err.message);
+      });
 
-      conn.on('data', (raw) => {
-        if (!isPeerMessage(raw)) return;
-
-        if (raw.type === 'request-join') {
-          const { name, persistentId } = raw;
-          const peerId = conn.peer;
-
-          if (optionsRef.current.approvedPlayers?.[persistentId] !== undefined) {
-            // Previously approved — let back in without host interaction
-            doApproveRef.current(conn, peerId, persistentId, name);
-            return;
-          }
-
-          // Queue for manual host approval
-          const entry: PendingEntry = { id: peerId, name, persistentId };
-          pendingConnsRef.current.set(peerId, conn);
-          pendingDataRef.current.set(peerId, entry);
-          setPendingPlayers((prev) => [...prev.filter((p) => p.id !== peerId), entry]);
+      peer.on('connection', (conn) => {
+        if (connectionsRef.current.size >= MAX_PLAYERS) {
+          conn.on('open', () => {
+            conn.send({ type: 'rejected', reason: 'Room is full' } as PeerMessage);
+            setTimeout(() => conn.close(), 200);
+          });
           return;
         }
 
-        if (raw.type === 'vote') {
-          updateState((prev) => ({
-            ...prev,
-            players: prev.players.map((p) =>
-              p.id === conn.peer ? { ...p, vote: raw.value } : p,
-            ),
-          }));
-        }
-      });
+        conn.on('data', (raw) => {
+          if (!isPeerMessage(raw)) return;
 
-      conn.on('close', () => {
-        if (pendingConnsRef.current.has(conn.peer)) {
-          pendingConnsRef.current.delete(conn.peer);
-          pendingDataRef.current.delete(conn.peer);
-          setPendingPlayers((prev) => prev.filter((p) => p.id !== conn.peer));
-        } else {
-          connectionsRef.current.delete(conn.peer);
-          peerToPersistentIdRef.current.delete(conn.peer);
-          updateState((prev) => ({
-            ...prev,
-            players: prev.players.map((p) =>
-              p.id === conn.peer ? { ...p, connected: false } : p,
-            ),
-          }));
-        }
+          if (raw.type === 'request-join') {
+            const { name, persistentId } = raw;
+            const peerId = conn.peer;
+
+            if (optionsRef.current.approvedPlayers?.[persistentId] !== undefined) {
+              // Previously approved — let back in without host interaction
+              doApproveRef.current(conn, peerId, persistentId, name);
+              return;
+            }
+
+            // Queue for manual host approval
+            const entry: PendingEntry = { id: peerId, name, persistentId };
+            pendingConnsRef.current.set(peerId, conn);
+            pendingDataRef.current.set(peerId, entry);
+            setPendingPlayers((prev) => [...prev.filter((p) => p.id !== peerId), entry]);
+            return;
+          }
+
+          if (raw.type === 'vote') {
+            updateState((prev) => ({
+              ...prev,
+              players: prev.players.map((p) =>
+                p.id === conn.peer ? { ...p, vote: raw.value } : p,
+              ),
+            }));
+          }
+        });
+
+        conn.on('close', () => {
+          if (pendingConnsRef.current.has(conn.peer)) {
+            pendingConnsRef.current.delete(conn.peer);
+            pendingDataRef.current.delete(conn.peer);
+            setPendingPlayers((prev) => prev.filter((p) => p.id !== conn.peer));
+          } else {
+            connectionsRef.current.delete(conn.peer);
+            peerToPersistentIdRef.current.delete(conn.peer);
+            updateState((prev) => ({
+              ...prev,
+              players: prev.players.map((p) =>
+                p.id === conn.peer ? { ...p, connected: false } : p,
+              ),
+            }));
+          }
+        });
       });
-    });
+    }
+
+    setupPeer(code);
 
     return () => {
-      peer.destroy();
+      peerRef.current?.destroy();
     };
   }, [hostName, updateState]);
 
