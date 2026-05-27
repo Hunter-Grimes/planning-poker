@@ -3,6 +3,7 @@ import { usePeerHost } from '../hooks/usePeerHost';
 import { CardDeck } from './CardDeck';
 import { PlayerList } from './PlayerList';
 import { ResultsView } from './ResultsView';
+import { ThemeToggle } from './ThemeToggle';
 import { CardValue, GamePhase, Story } from '../types';
 import { storage } from '../storage';
 
@@ -42,12 +43,12 @@ function SprintBacklog({
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
         Components
       </h2>
 
       {stories.length === 0 && (
-        <p className="text-gray-600 text-sm mb-3">No components yet. Add one below.</p>
+        <p className="text-gray-500 dark:text-gray-600 text-sm mb-3">No components yet. Add one below.</p>
       )}
 
       {stories.length > 0 && (
@@ -64,12 +65,12 @@ function SprintBacklog({
                 className={[
                   'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm',
                   isActive
-                    ? 'bg-indigo-950 border-indigo-700'
+                    ? 'bg-indigo-50 dark:bg-indigo-950 border-indigo-300 dark:border-indigo-700'
                     : isDone
-                      ? 'bg-gray-900 border-gray-800'
+                      ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800'
                       : !story.enabled
-                        ? 'bg-gray-900 border-gray-800 opacity-40'
-                        : 'bg-gray-900 border-gray-700',
+                        ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800 opacity-40'
+                        : 'bg-gray-100 dark:bg-gray-900 border-gray-300 dark:border-gray-700',
                 ].join(' ')}
               >
                 {canToggle ? (
@@ -80,7 +81,7 @@ function SprintBacklog({
                       'flex-none w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0',
                       story.enabled
                         ? 'bg-indigo-600 border-indigo-500'
-                        : 'bg-transparent border-gray-600 hover:border-gray-400',
+                        : 'bg-transparent border-gray-400 dark:border-gray-600 hover:border-gray-600 dark:hover:border-gray-400',
                     ].join(' ')}
                   >
                     {story.enabled && (
@@ -97,31 +98,31 @@ function SprintBacklog({
                   className={[
                     'flex-1 truncate',
                     isActive
-                      ? 'text-white font-medium'
+                      ? 'text-gray-900 dark:text-white font-medium'
                       : isDone
-                        ? 'text-gray-400'
+                        ? 'text-gray-500 dark:text-gray-400'
                         : !story.enabled
-                          ? 'text-gray-600'
-                          : 'text-gray-300',
+                          ? 'text-gray-400 dark:text-gray-600'
+                          : 'text-gray-700 dark:text-gray-300',
                   ].join(' ')}
                 >
                   {story.label}
                 </span>
 
                 {isDone && (
-                  <span className="flex-none text-xs text-gray-400 font-mono tabular-nums">
+                  <span className="flex-none text-xs text-gray-500 dark:text-gray-400 font-mono tabular-nums">
                     {story.average !== null ? story.average.toFixed(1) : '—'}
                   </span>
                 )}
                 {isActive && (
-                  <span className="flex-none text-xs text-indigo-400 font-medium">Active</span>
+                  <span className="flex-none text-xs text-indigo-600 dark:text-indigo-400 font-medium">Active</span>
                 )}
 
                 {canDelete && (
                   <button
                     onClick={() => onRemove(story.id)}
                     title="Remove component"
-                    className="flex-none text-gray-600 hover:text-red-400 transition-colors text-lg leading-none"
+                    className="flex-none text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition-colors text-lg leading-none"
                   >
                     ×
                   </button>
@@ -141,12 +142,12 @@ function SprintBacklog({
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
             placeholder="Add a component…"
             maxLength={120}
-            className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+            className="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-500"
           />
           <button
             onClick={handleAdd}
             disabled={!draft.trim()}
-            className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+            className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white text-sm px-3 py-2 rounded-lg transition-colors"
           >
             Add
           </button>
@@ -162,24 +163,24 @@ function SprintSummary({ stories }: { stories: Story[] }) {
 
   return (
     <div className="mb-6">
-      <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
         Estimate Summary
       </h2>
-      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
         {voted.map((story) => (
           <div
             key={story.id}
-            className="flex items-center justify-between px-4 py-3 border-b border-gray-800 last:border-0"
+            className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 last:border-0"
           >
-            <span className="text-sm text-gray-300 truncate mr-4">{story.label}</span>
-            <span className="text-sm font-mono text-white flex-none">
+            <span className="text-sm text-gray-700 dark:text-gray-300 truncate mr-4">{story.label}</span>
+            <span className="text-sm font-mono text-gray-900 dark:text-white flex-none">
               {story.average!.toFixed(1)}
             </span>
           </div>
         ))}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-800">
-          <span className="text-sm font-semibold text-white">Total</span>
-          <span className="text-sm font-mono font-bold text-white">{total.toFixed(1)}</span>
+        <div className="flex items-center justify-between px-4 py-3 bg-gray-100 dark:bg-gray-800">
+          <span className="text-sm font-semibold text-gray-900 dark:text-white">Total</span>
+          <span className="text-sm font-mono font-bold text-gray-900 dark:text-white">{total.toFixed(1)}</span>
         </div>
       </div>
     </div>
@@ -287,12 +288,12 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-red-400 mb-4">Connection error: {error}</p>
+          <p className="text-red-600 dark:text-red-400 mb-4">Connection error: {error}</p>
           <button
             onClick={handleClose}
-            className="text-sm bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors"
+            className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
           >
             Back to Home
           </button>
@@ -303,20 +304,20 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
 
   if (!roomId) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <p className="text-gray-400 animate-pulse">Creating room…</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-500 dark:text-gray-400 animate-pulse">Creating room…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
+        <div className="flex items-center justify-between mb-6 gap-2">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold">Planning Poker</h1>
-            <p className="text-gray-400 text-sm">
+            <p className="text-gray-500 dark:text-gray-400 text-sm">
               {gameState.phase === 'summary'
                 ? 'Estimate complete'
                 : gameState.phase === 'voting'
@@ -324,13 +325,14 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
                   : "You're the host"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs bg-gray-800 text-gray-400 px-3 py-1 rounded-full border border-gray-700">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <ThemeToggle />
+            <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700">
               {connectedCount} player{connectedCount !== 1 ? 's' : ''}
             </span>
             <button
               onClick={handleClose}
-              className="text-xs bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 px-3 py-1 rounded-full border border-gray-700 hover:border-red-800 transition-colors"
+              className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-red-100 dark:hover:bg-red-950 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-800 transition-colors"
               title="Close session"
             >
               Close session
@@ -338,41 +340,43 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
           </div>
         </div>
 
-        {/* Room code */}
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 text-center">
-          <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">Room code</p>
-          <p className="text-4xl font-bold font-mono tracking-[0.2em] text-white mb-3">{roomId}</p>
+        {/* Room code — compact pill */}
+        <div className="mb-6 flex items-center gap-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
+          <span className="text-xs text-gray-500 dark:text-gray-500 uppercase tracking-wide font-medium">Code</span>
+          <span className="font-mono font-semibold tracking-[0.15em] text-gray-900 dark:text-white">{roomId}</span>
           <button
             onClick={copyCode}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-4 py-1.5 rounded-lg transition-colors"
+            title="Copy room code"
+            aria-label="Copy room code"
+            className="ml-auto text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded transition-colors"
           >
-            {copied ? 'Copied!' : 'Copy code'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
 
         {/* Currently voting banner */}
         {gameState.phase === 'voting' && activeStory && (
-          <div className="bg-indigo-950 border border-indigo-800 rounded-xl px-4 py-3 mb-6">
-            <p className="text-xs text-indigo-400 font-medium uppercase tracking-wide mb-0.5">
+          <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl px-4 py-3 mb-6">
+            <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium uppercase tracking-wide mb-0.5">
               Currently voting
             </p>
-            <p className="text-white font-semibold">{activeStory.label}</p>
+            <p className="text-gray-900 dark:text-white font-semibold">{activeStory.label}</p>
           </div>
         )}
 
         {/* Pending approvals */}
         {pendingPlayers.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-sm font-semibold text-yellow-400 uppercase tracking-wide mb-3">
+            <h2 className="text-sm font-semibold text-yellow-700 dark:text-yellow-400 uppercase tracking-wide mb-3">
               Waiting to join ({pendingPlayers.length})
             </h2>
             <div className="flex flex-col gap-2">
               {pendingPlayers.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center justify-between px-4 py-3 rounded-xl border bg-gray-900 border-yellow-700"
+                  className="flex items-center justify-between px-4 py-3 rounded-xl border bg-yellow-50 dark:bg-gray-900 border-yellow-300 dark:border-yellow-700"
                 >
-                  <span className="text-sm font-medium text-gray-200">{p.name}</span>
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.name}</span>
                   <div className="flex gap-2">
                     <button
                       onClick={() => approvePlayer(p.id)}
@@ -382,7 +386,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
                     </button>
                     <button
                       onClick={() => denyPlayer(p.id)}
-                      className="text-xs bg-red-800 hover:bg-red-700 text-white px-3 py-1 rounded-lg transition-colors"
+                      className="text-xs bg-red-700 dark:bg-red-800 hover:bg-red-600 dark:hover:bg-red-700 text-white px-3 py-1 rounded-lg transition-colors"
                     >
                       Deny
                     </button>
@@ -395,7 +399,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
 
         {/* Players */}
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             {gameState.phase === 'voting'
               ? `Players (${votedCount}/${connectedCount} voted)`
               : `Players (${connectedCount})`}
@@ -416,7 +420,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
         {/* Your cards */}
         {gameState.phase === 'voting' && !gameState.revealed && (
           <div className="mb-6">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
               Your vote
             </h2>
             <CardDeck selected={myVote} onSelect={handleVote} disabled={gameState.revealed} />
@@ -443,7 +447,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
             <button
               onClick={startVoting}
               disabled={enabledCount === 0}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
+              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
             >
               {enabledCount === 0 ? 'Add components to start' : 'Start Voting'}
             </button>
@@ -454,7 +458,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
               <button
                 onClick={handleReveal}
                 disabled={votedCount === 0}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
+                className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
               >
                 {allVoted ? 'Reveal Votes' : `Reveal Votes (${votedCount}/${connectedCount})`}
               </button>
@@ -464,8 +468,8 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
                 className={[
                   'px-4 rounded-xl border font-semibold text-sm transition-colors',
                   autoReveal
-                    ? 'bg-indigo-900 border-indigo-600 text-indigo-300'
-                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500',
+                    ? 'bg-indigo-100 dark:bg-indigo-900 border-indigo-400 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300'
+                    : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-500',
                 ].join(' ')}
               >
                 Auto
@@ -477,7 +481,7 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
             <>
               <button
                 onClick={handleNewRound}
-                className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl py-3 px-5 transition-colors"
+                className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-white font-semibold rounded-xl py-3 px-5 transition-colors"
               >
                 Re-vote
               </button>

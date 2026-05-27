@@ -57,6 +57,17 @@ export function usePeerClient(roomId: string, playerName: string, persistentId: 
       setStatus('error');
     });
 
+    peer.on('disconnected', () => {
+      // Try to recover signaling so the client can keep receiving host updates.
+      if (!peer.destroyed) {
+        try {
+          peer.reconnect();
+        } catch (e) {
+          console.warn('[usePeerClient] reconnect failed:', e);
+        }
+      }
+    });
+
     return () => {
       peer.destroy();
     };

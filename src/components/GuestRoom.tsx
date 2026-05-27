@@ -3,6 +3,7 @@ import { usePeerClient } from '../hooks/usePeerClient';
 import { CardDeck } from './CardDeck';
 import { PlayerList } from './PlayerList';
 import { ResultsView } from './ResultsView';
+import { ThemeToggle } from './ThemeToggle';
 import { CardValue } from '../types';
 import { storage } from '../storage';
 
@@ -45,13 +46,13 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
 
   if (error || status === 'error') {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-red-400 mb-2">{error ?? 'Could not connect to room.'}</p>
-          <p className="text-gray-500 text-sm mb-4">The host may have closed the session.</p>
+          <p className="text-red-600 dark:text-red-400 mb-2">{error ?? 'Could not connect to room.'}</p>
+          <p className="text-gray-500 dark:text-gray-500 text-sm mb-4">The host may have closed the session.</p>
           <button
             onClick={handleLeave}
-            className="text-sm bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors"
+            className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
           >
             Back to Home
           </button>
@@ -62,12 +63,12 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
 
   if (status === 'disconnected') {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-400 mb-4">Disconnected from room.</p>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">Disconnected from room.</p>
           <button
             onClick={handleLeave}
-            className="text-sm bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors"
+            className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
           >
             Back to Home
           </button>
@@ -78,24 +79,24 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
 
   if (status === 'connecting') {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <p className="text-gray-400 animate-pulse">Connecting to room…</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-600 dark:text-gray-400 animate-pulse">Connecting to room…</p>
       </div>
     );
   }
 
   if (status === 'pending') {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <p className="text-gray-400 animate-pulse">Waiting for host to approve your request…</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-600 dark:text-gray-400 animate-pulse">Waiting for host to approve your request…</p>
       </div>
     );
   }
 
   if (!gameState) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <p className="text-gray-400 animate-pulse">Loading…</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-600 dark:text-gray-400 animate-pulse">Loading…</p>
       </div>
     );
   }
@@ -105,13 +106,13 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
   const activeStory = gameState.stories.find((s) => s.id === gameState.activeStoryId);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
+        <div className="flex items-center justify-between mb-6 gap-2">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold">Planning Poker</h1>
-            <p className="text-gray-400 text-sm">
+            <p className="text-gray-500 dark:text-gray-400 text-sm">
               {gameState.phase === 'summary'
                 ? 'Estimate complete'
                 : gameState.phase === 'voting'
@@ -119,13 +120,14 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
                   : 'Waiting to start'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs bg-gray-800 text-gray-400 px-3 py-1 rounded-full border border-gray-700">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <ThemeToggle />
+            <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700">
               {connectedCount} player{connectedCount !== 1 ? 's' : ''}
             </span>
             <button
               onClick={handleLeave}
-              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white px-3 py-1 rounded-full border border-gray-700 transition-colors"
+              className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 transition-colors"
             >
               Leave
             </button>
@@ -134,17 +136,17 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
 
         {/* Currently voting banner */}
         {gameState.phase === 'voting' && activeStory && (
-          <div className="bg-indigo-950 border border-indigo-800 rounded-xl px-4 py-3 mb-6">
-            <p className="text-xs text-indigo-400 font-medium uppercase tracking-wide mb-0.5">
+          <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl px-4 py-3 mb-6">
+            <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium uppercase tracking-wide mb-0.5">
               Currently voting
             </p>
-            <p className="text-white font-semibold">{activeStory.label}</p>
+            <p className="text-gray-900 dark:text-white font-semibold">{activeStory.label}</p>
           </div>
         )}
 
         {/* Players */}
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             {gameState.phase === 'voting'
               ? `Players (${votedCount}/${connectedCount} voted)`
               : `Players (${connectedCount})`}
@@ -155,26 +157,26 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
         {/* Sprint summary */}
         {gameState.phase === 'summary' && (
           <div className="mb-6">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
               Estimate Summary
             </h2>
-            <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {gameState.stories
                 .filter((s) => s.enabled && s.average !== null)
                 .map((story) => (
                   <div
                     key={story.id}
-                    className="flex items-center justify-between px-4 py-3 border-b border-gray-800 last:border-0"
+                    className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 last:border-0"
                   >
-                    <span className="text-sm text-gray-300 truncate mr-4">{story.label}</span>
-                    <span className="text-sm font-mono text-white flex-none">
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate mr-4">{story.label}</span>
+                    <span className="text-sm font-mono text-gray-900 dark:text-white flex-none">
                       {story.average!.toFixed(1)}
                     </span>
                   </div>
                 ))}
-              <div className="flex items-center justify-between px-4 py-3 bg-gray-800">
-                <span className="text-sm font-semibold text-white">Total</span>
-                <span className="text-sm font-mono font-bold text-white">
+              <div className="flex items-center justify-between px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">Total</span>
+                <span className="text-sm font-mono font-bold text-gray-900 dark:text-white">
                   {gameState.stories
                     .filter((s) => s.enabled && s.average !== null)
                     .reduce((sum, s) => sum + s.average!, 0)
@@ -195,24 +197,24 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
         {/* Cards / waiting messages */}
         {gameState.phase === 'voting' && !gameState.revealed && (
           <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
               Your vote
             </h2>
             <CardDeck selected={myVote} onSelect={handleVote} />
           </div>
         )}
         {gameState.phase === 'voting' && gameState.revealed && (
-          <p className="text-center text-gray-500 text-sm mt-4">
+          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
             Waiting for host to continue…
           </p>
         )}
         {gameState.phase === 'setup' && (
-          <p className="text-center text-gray-500 text-sm mt-4">
+          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
             Waiting for host to start voting…
           </p>
         )}
         {gameState.phase === 'summary' && (
-          <p className="text-center text-gray-500 text-sm mt-4">
+          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
             Waiting for host to start next ticket…
           </p>
         )}

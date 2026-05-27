@@ -5,3 +5,27 @@
 * {
   box-sizing: border-box;
 }
+
+html,
+body {
+  min-height: 100%;
+  background-color: rgb(249 250 251); /* gray-50 */
+}
+
+html.dark,
+html.dark body {
+  background-color: rgb(3 7 18); /* gray-950 */
+}
+
+html {
+  /* Match overscroll/rubber-band background on mobile so it doesn't flash white */
+  background-color: rgb(249 250 251);
+}
+
+html.dark {
+  background-color: rgb(3 7 18);
+}
+
+#root {
+  min-height: 100vh;
+}

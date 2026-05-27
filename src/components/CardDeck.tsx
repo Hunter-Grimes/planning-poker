@@ -24,7 +24,7 @@ export function CardDeck({ selected, onSelect, disabled = false }: Props) {
               isSelected
                 ? `${colors.selected} scale-110`
                 : disabled
-                  ? 'bg-gray-800 border-gray-700 text-gray-500'
+                  ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-500'
                   : colors.idle,
             ].join(' ')}
           >
