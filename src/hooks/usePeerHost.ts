@@ -55,9 +55,21 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   const pendingDataRef = useRef<Map<string, PendingEntry>>(new Map());
   const peerToPersistentIdRef = useRef<Map<string, string>>(new Map());
 
+  // Source of truth for which persistent IDs auto-approve. Seeded from props on
+  // first render; kept in sync internally as players are approved or kicked so
+  // we never go stale against the prop snapshot.
+  const approvedIdsRef = useRef<Set<string> | null>(null);
+  if (approvedIdsRef.current === null) {
+    approvedIdsRef.current = new Set(Object.keys(options.approvedPlayers ?? {}));
+  }
+
   // Keep options current without causing effect re-runs
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  // Same pattern for hostName — so renaming doesn't tear down the peer / room.
+  const hostNameRef = useRef(hostName);
+  hostNameRef.current = hostName;
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +131,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         if (c.open && c !== conn) c.send({ type: 'state', state: next } as PeerMessage);
       });
 
+      approvedIdsRef.current!.add(persistentId);
       optionsRef.current.onApprove?.(persistentId, name);
     },
     [],
@@ -139,22 +152,41 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         setRoomId(id);
         const next: GameState = {
           ...gameStateRef.current,
-          players: [{ id, name: hostName, vote: null, connected: true }],
+          players: [{ id, name: hostNameRef.current, vote: null, connected: true }],
         };
         gameStateRef.current = next;
         setGameState(next);
       });
 
       peer.on('error', (err) => {
-        // The requested ID is already registered on the broker — this happens when
+        const type = (err as { type?: string }).type;
+        // The requested ID is already registered on the broker — happens when
         // React StrictMode double-mounts the effect, or when the host refreshes
         // before the broker's TTL expires. Retry with a freshly generated code.
-        if ((err as any).type === 'unavailable-id') {
+        if (type === 'unavailable-id') {
           peer.destroy();
           setupPeer(generateRoomCode());
           return;
         }
+        // Non-fatal: a specific peer couldn't be reached. Logging only — keeps
+        // the host alive so other clients can still connect.
+        if (type === 'peer-unavailable') {
+          console.warn('[usePeerHost] peer-unavailable:', err.message);
+          return;
+        }
         setError(err.message);
+      });
+
+      peer.on('disconnected', () => {
+        // Lost signaling to the broker but existing data connections survive.
+        // Reconnect so new clients can still join.
+        if (!peer.destroyed) {
+          try {
+            peer.reconnect();
+          } catch (e) {
+            console.warn('[usePeerHost] reconnect failed:', e);
+          }
+        }
       });
 
       peer.on('connection', (conn) => {
@@ -172,8 +204,31 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           if (raw.type === 'request-join') {
             const { name, persistentId } = raw;
             const peerId = conn.peer;
+            const normalized = name.trim().toLowerCase();
 
-            if (optionsRef.current.approvedPlayers?.[persistentId] !== undefined) {
+            // Reject if another connected player or pending guest already holds this name.
+            // A returning guest (same persistentId) is allowed to keep theirs.
+            const takenByPlayer = gameStateRef.current.players.some(
+              (p) =>
+                p.connected &&
+                peerToPersistentIdRef.current.get(p.id) !== persistentId &&
+                p.name.trim().toLowerCase() === normalized,
+            );
+            const takenByPending = [...pendingDataRef.current.values()].some(
+              (p) => p.persistentId !== persistentId && p.name.trim().toLowerCase() === normalized,
+            );
+            if (takenByPlayer || takenByPending) {
+              if (conn.open) {
+                conn.send({
+                  type: 'rejected',
+                  reason: 'That name is already in use. Please choose another.',
+                } as PeerMessage);
+                setTimeout(() => conn.close(), 200);
+              }
+              return;
+            }
+
+            if (approvedIdsRef.current!.has(persistentId)) {
               // Previously approved — let back in without host interaction
               doApproveRef.current(conn, peerId, persistentId, name);
               return;
@@ -188,6 +243,9 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           }
 
           if (raw.type === 'vote') {
+            // Ignore votes once results are revealed or outside the voting phase —
+            // otherwise a guest can mutate their displayed vote after consensus.
+            if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
             updateState((prev) => ({
               ...prev,
               players: prev.players.map((p) =>
@@ -221,7 +279,9 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     return () => {
       peerRef.current?.destroy();
     };
-  }, [hostName, updateState]);
+    // hostName is read via hostNameRef so renaming doesn't tear down the room.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updateState]);
 
   const approvePlayer = useCallback((peerId: string) => {
     const conn = pendingConnsRef.current.get(peerId);
@@ -264,6 +324,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     }
 
     if (persistentId) {
+      approvedIdsRef.current!.delete(persistentId);
       optionsRef.current.onKick?.(persistentId);
     }
   }, [updateState]);
@@ -292,7 +353,9 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       ...prev,
       revealed: false,
       round: prev.round + 1,
-      players: prev.players.map((p) => ({ ...p, vote: null })),
+      // Drop players who are still disconnected — they sat out the prior round
+      // and shouldn't accumulate in the list across rounds.
+      players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
     }));
   }, [updateState]);
 
@@ -323,7 +386,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         phase: 'voting' as GamePhase,
         activeStoryId: first.id,
         revealed: false,
-        players: prev.players.map((p) => ({ ...p, vote: null })),
+        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
       };
     });
   }, [updateState]);
@@ -352,7 +415,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           activeStoryId: null,
           phase: 'summary' as GamePhase,
           revealed: false,
-          players: prev.players.map((p) => ({ ...p, vote: null })),
+          players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
         };
       }
 
@@ -362,7 +425,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         activeStoryId: next.id,
         revealed: false,
         round: prev.round + 1,
-        players: prev.players.map((p) => ({ ...p, vote: null })),
+        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
       };
     });
   }, [updateState]);
@@ -375,7 +438,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       phase: 'setup' as GamePhase,
       revealed: false,
       round: 1,
-      players: prev.players.map((p) => ({ ...p, vote: null })),
+      players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
     }));
   }, [updateState]);
 

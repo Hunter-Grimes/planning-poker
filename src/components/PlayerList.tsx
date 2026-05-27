@@ -7,7 +7,7 @@ interface Props {
   onKick?: (peerId: string) => void;
 }
 
-function PlayerRow({
+function PlayerCard({
   player,
   revealed,
   isMe,
@@ -19,50 +19,73 @@ function PlayerRow({
   onKick?: (peerId: string) => void;
 }) {
   const hasVoted = player.vote !== null;
+  const showKick = !!onKick && !isMe;
+  const showVote = revealed && hasVoted;
+
+  const bodyClass = showVote
+    ? getCardColors(player.vote!).soft
+    : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
 
   return (
     <div
       className={[
-        'flex items-center justify-between px-4 py-3 rounded-xl border',
-        player.connected
-          ? 'bg-gray-800 border-gray-700'
-          : 'bg-gray-900 border-gray-800 opacity-50',
-      ].join(' ')}
+        'relative w-28 h-36 rounded-2xl shadow-md flex flex-col items-center pt-3 pb-4',
+        bodyClass,
+        !player.connected && 'opacity-50',
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-200">
+      {/* Name pill */}
+      <div
+        className={[
+          'flex items-center gap-1 px-2.5 py-1 max-w-[90%] rounded-full shadow-sm text-xs font-medium',
+          'bg-white dark:bg-gray-900',
+          isMe
+            ? 'text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-400 dark:ring-indigo-600'
+            : 'text-gray-800 dark:text-gray-200',
+        ].join(' ')}
+      >
+        <span className="truncate" title={player.name}>
           {player.name}
-          {isMe && <span className="ml-1 text-xs text-indigo-400">(you)</span>}
         </span>
-        {!player.connected && <span className="text-xs text-gray-500">disconnected</span>}
-      </div>
-
-      <div className="flex items-center gap-2">
-        {onKick && !isMe && (
+        {showKick && (
           <button
-            onClick={() => onKick(player.id)}
-            title="Remove player"
-            className="text-gray-600 hover:text-red-400 transition-colors text-lg leading-none"
+            onClick={() => onKick!(player.id)}
+            title={`Remove ${player.name}`}
+            aria-label={`Remove ${player.name}`}
+            className="flex-none flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:text-white hover:bg-red-500 transition-colors"
           >
-            ×
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M3 3l6 6M9 3l-6 6" />
+            </svg>
           </button>
         )}
+      </div>
 
-        <div className="w-10 h-14 rounded-lg flex items-center justify-center text-sm font-bold border-2 transition-all">
-          {revealed && hasVoted ? (
-            <span className={`${getCardColors(player.vote!).chip} text-white w-full h-full rounded-lg flex items-center justify-center`}>
-              {String(player.vote)}
-            </span>
-          ) : hasVoted ? (
-            <span className="bg-emerald-700 border-emerald-500 text-emerald-200 w-full h-full rounded-lg flex items-center justify-center text-xs">
-              ✓
-            </span>
-          ) : (
-            <span className="bg-gray-700 border-gray-600 text-gray-500 w-full h-full rounded-lg flex items-center justify-center text-xs">
-              …
-            </span>
-          )}
-        </div>
+      {/* Vote / state */}
+      <div className="flex-1 flex items-center justify-center w-full">
+        {showVote ? (
+          <span className="text-5xl font-bold tabular-nums select-none">
+            {String(player.vote)}
+          </span>
+        ) : hasVoted ? (
+          <svg
+            className="w-10 h-10 text-emerald-600 dark:text-emerald-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+        ) : !player.connected ? (
+          <span className="text-xs uppercase tracking-wide">offline</span>
+        ) : (
+          <span className="text-3xl font-bold text-gray-400 dark:text-gray-600">…</span>
+        )}
       </div>
     </div>
   );
@@ -70,11 +93,11 @@ function PlayerRow({
 
 export function PlayerList({ gameState, myId, onKick }: Props) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-wrap gap-3 justify-center sm:justify-start">
       {gameState.players
         .filter((p) => p.connected || gameState.revealed)
         .map((player) => (
-          <PlayerRow
+          <PlayerCard
             key={player.id}
             player={player}
             revealed={gameState.revealed}

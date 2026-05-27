@@ -38,15 +38,15 @@ export function ResultsView({ gameState }: Props) {
   }, [consensus]);
 
   return (
-    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-      <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Results</h3>
+    <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+      <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Results</h3>
       <div className="flex flex-wrap gap-2 mb-3">
         {gameState.players
           .filter((p) => p.connected && p.vote !== null)
           .map((p) => (
             <span
               key={p.id}
-              className="bg-gray-700 text-white text-sm px-3 py-1 rounded-full"
+              className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white text-sm px-3 py-1 rounded-full"
             >
               {p.name}: <strong>{String(p.vote)}</strong>
             </span>
@@ -54,8 +54,8 @@ export function ResultsView({ gameState }: Props) {
       </div>
 
       {avg !== null && (
-        <p className="text-gray-300 text-sm">
-          Average: <strong className="text-white">{avg.toFixed(1)}</strong>
+        <p className="text-gray-700 dark:text-gray-300 text-sm">
+          Average: <strong className="text-gray-900 dark:text-white">{avg.toFixed(1)}</strong>
         </p>
       )}
     </div>
