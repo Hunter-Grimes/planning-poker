@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ThemeToggle } from './ThemeToggle';
+import { MAX_NAME_LENGTH } from '../types';
 
 interface Props {
   roomId: string;
@@ -28,7 +29,7 @@ export function JoinScreen({ roomId, onJoin }: Props) {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && name.trim() && onJoin(name.trim())}
           placeholder="e.g. Bob"
-          maxLength={64}
+          maxLength={MAX_NAME_LENGTH}
           className="w-full bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-3 border border-gray-300 dark:border-gray-700 focus:outline-none focus:border-indigo-500 mb-4"
           autoFocus
         />

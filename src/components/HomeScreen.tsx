@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ThemeToggle } from './ThemeToggle';
+import { MAX_NAME_LENGTH } from '../types';
 
 interface Props {
   onCreateRoom: (name: string) => void;
@@ -29,7 +30,7 @@ export function HomeScreen({ onCreateRoom, onJoinRoom }: Props) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          maxLength={64}
+          maxLength={MAX_NAME_LENGTH}
           placeholder="Enter your name"
           className="w-full bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-3 border border-gray-300 dark:border-gray-700 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 placeholder-gray-400 dark:placeholder-gray-600"
           autoFocus

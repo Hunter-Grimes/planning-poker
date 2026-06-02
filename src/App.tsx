@@ -4,6 +4,7 @@ import { JoinScreen } from './components/JoinScreen';
 import { HostRoom } from './components/HostRoom';
 import { GuestRoom } from './components/GuestRoom';
 import { storage } from './storage';
+import { randomId } from './types';
 
 type AppState =
   | { screen: 'home' }
@@ -22,6 +23,10 @@ function getInitialState(): AppState {
   if (hostSession) {
     return { screen: 'hosting', hostName: hostSession.hostName, roomCode: hostSession.roomCode };
   }
+
+  // No host session: any persisted stories are orphans from a tab close or
+  // crash and would otherwise resurface in a fresh room — drop them.
+  storage.clearStories();
 
   // Restore guest session if one exists
   const guestSession = storage.getGuest();
@@ -51,7 +56,7 @@ export function App() {
             screen: 'guest',
             roomId: code,
             playerName: name,
-            persistentId: crypto.randomUUID(),
+            persistentId: randomId(),
           })
         }
       />
@@ -67,7 +72,7 @@ export function App() {
             screen: 'guest',
             roomId: state.roomId,
             playerName: name,
-            persistentId: crypto.randomUUID(),
+            persistentId: randomId(),
           })
         }
       />

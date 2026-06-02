@@ -9,6 +9,7 @@ import {
   Player,
   Story,
   isPeerMessage,
+  randomId,
   MAX_PLAYERS,
 } from '../types';
 
@@ -30,11 +31,12 @@ export interface UsePeerHostReturn {
   denyPlayer: (peerId: string) => void;
   kickPlayer: (peerId: string) => void;
   castHostVote: (value: CardValue | null) => void;
+  castHostActive: () => void;
   error: string | null;
   addStory: (label: string) => void;
   removeStory: (id: string) => void;
   toggleStory: (id: string) => void;
-  startVoting: () => void;
+  renameStory: (id: string, label: string) => void;
   nextStory: () => void;
   newSprint: () => void;
 }
@@ -74,24 +76,43 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   const [roomId, setRoomId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingPlayers, setPendingPlayers] = useState<PendingEntry[]>([]);
-  const [gameState, setGameState] = useState<GameState>(() => ({
-    players: [],
-    revealed: false,
-    round: 1,
-    stories: options.initialStories ?? [],
-    activeStoryId: null,
-    phase: 'setup',
-  }));
+  const [gameState, setGameState] = useState<GameState>(() => {
+    const stories = options.initialStories ?? [];
+    const firstVotable = stories.find((s) => s.enabled && s.average === null);
+    return {
+      players: [],
+      revealed: false,
+      round: 1,
+      stories,
+      activeStoryId: firstVotable?.id ?? null,
+      phase: 'voting',
+      hostId: null,
+    };
+  });
 
   // Always-current ref so callbacks can read and compute the next state
   // synchronously without relying on React's async state batching.
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
 
+  const redactForClient = (state: GameState, recipientPeerId: string): GameState => ({
+    ...state,
+    players: state.players.map((p) => {
+      const reveal = state.revealed || p.id === recipientPeerId;
+      return {
+        ...p,
+        hasVoted: p.vote !== null,
+        vote: reveal ? p.vote : null,
+      };
+    }),
+  });
+
   const broadcast = useCallback((state: GameState) => {
-    const msg: PeerMessage = { type: 'state', state };
-    connectionsRef.current.forEach((conn) => {
-      if (conn.open) conn.send(msg);
+    connectionsRef.current.forEach((conn, peerId) => {
+      if (conn.open) {
+        const redacted = redactForClient(state, peerId);
+        conn.send({ type: 'state', state: redacted } satisfies PeerMessage);
+      }
     });
   }, []);
 
@@ -110,31 +131,39 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   // Shared approval logic — callable from both auto-approve and manual approve paths
   const doApprove = useCallback(
     (conn: DataConnection, peerId: string, persistentId: string, name: string) => {
+      // If a prior connection for the same peer is still in the map (rapid
+      // refresh, network blip), close it explicitly so its 'close' handler
+      // can't race the new one into marking the player disconnected.
+      const prior = connectionsRef.current.get(peerId);
+      if (prior && prior !== conn) {
+        try {
+          prior.close();
+        } catch {
+          // best-effort
+        }
+      }
       connectionsRef.current.set(peerId, conn);
       peerToPersistentIdRef.current.set(peerId, persistentId);
 
-      const newPlayer: Player = { id: peerId, name, vote: null, connected: true };
-      const prev = gameStateRef.current;
-      const next: GameState = {
-        ...prev,
-        players: [...prev.players.filter((p) => p.id !== peerId), newPlayer],
-      };
-      gameStateRef.current = next;
-      setGameState(next);
-
-      // Send outside any React updater so messages are always dispatched exactly once.
+      // Direct one-shot 'approved' — not part of broadcast state.
       if (conn.open) {
-        conn.send({ type: 'approved' } as PeerMessage);
-        conn.send({ type: 'state', state: next } as PeerMessage);
+        conn.send({ type: 'approved' });
       }
-      connectionsRef.current.forEach((c) => {
-        if (c.open && c !== conn) c.send({ type: 'state', state: next } as PeerMessage);
+
+      // Add/refresh the player and broadcast — broadcast now hits the new
+      // conn too since we just added it to connectionsRef.
+      updateState((prev) => {
+        const newPlayer: Player = { id: peerId, name, vote: null, connected: true };
+        return {
+          ...prev,
+          players: [...prev.players.filter((p) => p.id !== peerId), newPlayer],
+        };
       });
 
       approvedIdsRef.current!.add(persistentId);
       optionsRef.current.onApprove?.(persistentId, name);
     },
-    [],
+    [updateState],
   );
 
   // Keep doApprove stable via ref so data-handler closures stay current
@@ -142,7 +171,12 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   doApproveRef.current = doApprove;
 
   useEffect(() => {
-    const code = optionsRef.current.roomCode ?? generateRoomCode();
+    const userSuppliedCode = optionsRef.current.roomCode;
+    const code = userSuppliedCode ?? generateRoomCode();
+    // Retry the same code up to N times before falling back to a new one —
+    // covers StrictMode double-mount and the broker's short TTL after refresh.
+    let unavailableRetries = 0;
+    const MAX_UNAVAILABLE_RETRIES = 3;
 
     function setupPeer(peerId: string) {
       const peer = new Peer(peerId);
@@ -150,9 +184,18 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
       peer.on('open', (id) => {
         setRoomId(id);
+        // Merge: don't clobber any players that may already have been added.
+        const prev = gameStateRef.current;
+        const hostExists = prev.players.some((p) => p.id === id);
         const next: GameState = {
-          ...gameStateRef.current,
-          players: [{ id, name: hostNameRef.current, vote: null, connected: true }],
+          ...prev,
+          hostId: id,
+          players: hostExists
+            ? prev.players
+            : [
+                { id, name: hostNameRef.current, vote: null, connected: true },
+                ...prev.players.filter((p) => p.id !== id),
+              ],
         };
         gameStateRef.current = next;
         setGameState(next);
@@ -162,9 +205,23 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         const type = (err as { type?: string }).type;
         // The requested ID is already registered on the broker — happens when
         // React StrictMode double-mounts the effect, or when the host refreshes
-        // before the broker's TTL expires. Retry with a freshly generated code.
+        // before the broker's TTL expires.
         if (type === 'unavailable-id') {
           peer.destroy();
+          if (unavailableRetries < MAX_UNAVAILABLE_RETRIES) {
+            unavailableRetries++;
+            // Backoff: 200ms, 600ms, 1200ms — broker TTL is short, this is usually enough.
+            const delay = 200 * unavailableRetries * unavailableRetries;
+            setTimeout(() => setupPeer(peerId), delay);
+            return;
+          }
+          // User supplied a code we still can't claim — surface it instead of
+          // silently switching the user to a different room.
+          if (userSuppliedCode && peerId === userSuppliedCode) {
+            setError(`Room code "${peerId}" is currently unavailable. Please close this room and create a new one.`);
+            return;
+          }
+          // Auto-generated code collision (rare): fall back to a fresh code.
           setupPeer(generateRoomCode());
           return;
         }
@@ -190,16 +247,26 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       });
 
       peer.on('connection', (conn) => {
-        if (connectionsRef.current.size >= MAX_PLAYERS) {
+        // Cap by player count (host is in `players` but not in `connectionsRef`),
+        // so use MAX_PLAYERS - 1 against the conn map.
+        if (connectionsRef.current.size >= MAX_PLAYERS - 1) {
           conn.on('open', () => {
-            conn.send({ type: 'rejected', reason: 'Room is full' } as PeerMessage);
+            conn.send({ type: 'rejected', reason: 'Room is full' });
             setTimeout(() => conn.close(), 200);
           });
           return;
         }
 
+        // Per-connection throttle: drop messages that arrive faster than the
+        // floor below. Bounds DoS via spam-driven rebroadcasts.
+        const MIN_INTERVAL_MS = 50;
+        let lastMsgAt = 0;
+
         conn.on('data', (raw) => {
           if (!isPeerMessage(raw)) return;
+          const now = Date.now();
+          if (now - lastMsgAt < MIN_INTERVAL_MS) return;
+          lastMsgAt = now;
 
           if (raw.type === 'request-join') {
             const { name, persistentId } = raw;
@@ -222,7 +289,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
                 conn.send({
                   type: 'rejected',
                   reason: 'That name is already in use. Please choose another.',
-                } as PeerMessage);
+                } satisfies PeerMessage);
                 setTimeout(() => conn.close(), 200);
               }
               return;
@@ -246,6 +313,9 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             // Ignore votes once results are revealed or outside the voting phase —
             // otherwise a guest can mutate their displayed vote after consensus.
             if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
+            // Only the currently-approved connection for this peer may vote.
+            // Stale/replaced/pending connections can't trigger broadcasts.
+            if (connectionsRef.current.get(conn.peer) !== conn) return;
             updateState((prev) => ({
               ...prev,
               players: prev.players.map((p) =>
@@ -253,23 +323,41 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
               ),
             }));
           }
-        });
 
-        conn.on('close', () => {
-          if (pendingConnsRef.current.has(conn.peer)) {
-            pendingConnsRef.current.delete(conn.peer);
-            pendingDataRef.current.delete(conn.peer);
-            setPendingPlayers((prev) => prev.filter((p) => p.id !== conn.peer));
-          } else {
-            connectionsRef.current.delete(conn.peer);
-            peerToPersistentIdRef.current.delete(conn.peer);
+          if (raw.type === 'active') {
+            // One-shot "engaging with the deck" signal; ignore once revealed.
+            if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
+            if (connectionsRef.current.get(conn.peer) !== conn) return;
+            const existing = gameStateRef.current.players.find((p) => p.id === conn.peer);
+            if (!existing || existing.active) return;
             updateState((prev) => ({
               ...prev,
               players: prev.players.map((p) =>
-                p.id === conn.peer ? { ...p, connected: false } : p,
+                p.id === conn.peer ? { ...p, active: true } : p,
               ),
             }));
           }
+        });
+
+        conn.on('close', () => {
+          if (pendingConnsRef.current.get(conn.peer) === conn) {
+            pendingConnsRef.current.delete(conn.peer);
+            pendingDataRef.current.delete(conn.peer);
+            setPendingPlayers((prev) => prev.filter((p) => p.id !== conn.peer));
+            return;
+          }
+          // Only mark disconnected if this conn is still the active one for
+          // the peer. A rapid reconnect may have replaced it; in that case
+          // the old close should be a no-op.
+          if (connectionsRef.current.get(conn.peer) !== conn) return;
+          connectionsRef.current.delete(conn.peer);
+          peerToPersistentIdRef.current.delete(conn.peer);
+          updateState((prev) => ({
+            ...prev,
+            players: prev.players.map((p) =>
+              p.id === conn.peer ? { ...p, connected: false } : p,
+            ),
+          }));
         });
       });
     }
@@ -301,7 +389,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     pendingDataRef.current.delete(peerId);
     setPendingPlayers((prev) => prev.filter((p) => p.id !== peerId));
     if (conn?.open) {
-      conn.send({ type: 'rejected', reason: 'Host denied your request' } as PeerMessage);
+      conn.send({ type: 'rejected', reason: 'Host denied your request' } satisfies PeerMessage);
       setTimeout(() => conn.close(), 200);
     }
   }, []);
@@ -319,7 +407,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     }));
 
     if (conn?.open) {
-      conn.send({ type: 'rejected', reason: 'You were removed by the host' } as PeerMessage);
+      conn.send({ type: 'rejected', reason: 'You were removed by the host' } satisfies PeerMessage);
       setTimeout(() => conn.close(), 200);
     }
 
@@ -331,18 +419,28 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
   const castHostVote = useCallback(
     (value: CardValue | null) => {
-      const next: GameState = {
-        ...gameStateRef.current,
-        players: gameStateRef.current.players.map((p) =>
-          p.id === peerRef.current?.id ? { ...p, vote: value } : p,
-        ),
-      };
-      gameStateRef.current = next;
-      setGameState(next);
-      broadcast(next);
+      const hostId = peerRef.current?.id;
+      if (!hostId) return;
+      if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
+      updateState((prev) => ({
+        ...prev,
+        players: prev.players.map((p) => (p.id === hostId ? { ...p, vote: value } : p)),
+      }));
     },
-    [broadcast],
+    [updateState],
   );
+
+  const castHostActive = useCallback(() => {
+    const hostId = peerRef.current?.id;
+    if (!hostId) return;
+    if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
+    const me = gameStateRef.current.players.find((p) => p.id === hostId);
+    if (!me || me.active) return;
+    updateState((prev) => ({
+      ...prev,
+      players: prev.players.map((p) => (p.id === hostId ? { ...p, active: true } : p)),
+    }));
+  }, [updateState]);
 
   const reveal = useCallback(() => {
     updateState((prev) => ({ ...prev, revealed: true }));
@@ -352,58 +450,96 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     updateState((prev) => ({
       ...prev,
       revealed: false,
-      round: prev.round + 1,
       // Drop players who are still disconnected — they sat out the prior round
       // and shouldn't accumulate in the list across rounds.
-      players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
+      players: prev.players
+        .filter((p) => p.connected)
+        .map((p) => ({ ...p, vote: null, active: false })),
     }));
   }, [updateState]);
 
   const addStory = useCallback((label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
-    const story: Story = { id: crypto.randomUUID(), label: trimmed, enabled: true, average: null };
-    updateState((prev) => ({ ...prev, stories: [...prev.stories, story] }));
+    const story: Story = { id: randomId(), label: trimmed, enabled: true, average: null };
+    updateState((prev) => {
+      const stories = [...prev.stories, story];
+      // If we're voting with no active story, the newly-added one becomes it —
+      // votes already cast stay attached.
+      const activeStoryId =
+        prev.activeStoryId === null && prev.phase === 'voting' ? story.id : prev.activeStoryId;
+      return { ...prev, stories, activeStoryId };
+    });
   }, [updateState]);
 
+  // Pick the next still-votable story when the active one goes away (removed or
+  // disabled). Prefer the next one forward, but fall back to ANY remaining
+  // votable story so we never strand the user with votable work but no active
+  // story. Returns null only when nothing is left to vote on.
+  const nextVotableAfter = (stories: Story[], idx: number): string | null =>
+    stories.find((s, i) => i > idx && s.enabled && s.average === null)?.id ??
+    stories.find((s) => s.enabled && s.average === null)?.id ??
+    null;
+
   const removeStory = useCallback((id: string) => {
-    updateState((prev) => ({ ...prev, stories: prev.stories.filter((s) => s.id !== id) }));
+    updateState((prev) => {
+      const idx = prev.stories.findIndex((s) => s.id === id);
+      const stories = prev.stories.filter((s) => s.id !== id);
+      const activeStoryId =
+        prev.activeStoryId === id ? nextVotableAfter(stories, idx - 1) : prev.activeStoryId;
+      return { ...prev, stories, activeStoryId };
+    });
   }, [updateState]);
 
   const toggleStory = useCallback((id: string) => {
-    updateState((prev) => ({
-      ...prev,
-      stories: prev.stories.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)),
-    }));
+    updateState((prev) => {
+      const stories = prev.stories.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
+      const toggled = stories.find((s) => s.id === id);
+      let activeStoryId = prev.activeStoryId;
+
+      if (prev.activeStoryId === id && toggled && !toggled.enabled) {
+        // Disabled the active story — hand off to the next votable one.
+        activeStoryId = nextVotableAfter(stories, stories.findIndex((s) => s.id === id));
+      } else if (
+        activeStoryId === null &&
+        toggled &&
+        toggled.enabled &&
+        toggled.average === null &&
+        prev.phase === 'voting'
+      ) {
+        // Re-enabled while nothing is active — adopt this one so voting can resume.
+        activeStoryId = id;
+      }
+
+      return { ...prev, stories, activeStoryId };
+    });
   }, [updateState]);
 
-  const startVoting = useCallback(() => {
-    updateState((prev) => {
-      const first = prev.stories.find((s) => s.enabled && s.average === null);
-      if (!first) return prev;
-      return {
-        ...prev,
-        phase: 'voting' as GamePhase,
-        activeStoryId: first.id,
-        revealed: false,
-        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
-      };
-    });
+  const renameStory = useCallback((id: string, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    updateState((prev) => ({
+      ...prev,
+      stories: prev.stories.map((s) => (s.id === id ? { ...s, label: trimmed } : s)),
+    }));
   }, [updateState]);
 
   const nextStory = useCallback(() => {
     updateState((prev) => {
-      const numericVotes = prev.players
-        .filter((p) => p.connected && p.vote !== null && p.vote !== '?')
-        .map((p) => p.vote as number);
-      const average =
-        numericVotes.length > 0
-          ? Math.round((numericVotes.reduce((a, b) => a + b, 0) / numericVotes.length) * 10) / 10
-          : null;
-
-      const stories = prev.stories.map((s) =>
-        s.id === prev.activeStoryId ? { ...s, average } : s,
-      );
+      // Only record an average if we were actually voting on something.
+      let stories = prev.stories;
+      if (prev.activeStoryId !== null) {
+        const numericVotes = prev.players
+          .filter((p) => p.connected && p.vote !== null && p.vote !== '?')
+          .map((p) => p.vote as number);
+        const average =
+          numericVotes.length > 0
+            ? Math.round((numericVotes.reduce((a, b) => a + b, 0) / numericVotes.length) * 10) / 10
+            : null;
+        stories = prev.stories.map((s) =>
+          s.id === prev.activeStoryId ? { ...s, average } : s,
+        );
+      }
 
       const currentIdx = stories.findIndex((s) => s.id === prev.activeStoryId);
       const next = stories.find((s, i) => i > currentIdx && s.enabled && s.average === null);
@@ -414,8 +550,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           stories,
           activeStoryId: null,
           phase: 'summary' as GamePhase,
-          revealed: false,
-          players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
+          players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
         };
       }
 
@@ -424,22 +559,26 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         stories,
         activeStoryId: next.id,
         revealed: false,
-        round: prev.round + 1,
-        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
+        round: 1,
+        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
       };
     });
   }, [updateState]);
 
   const newSprint = useCallback(() => {
-    updateState((prev) => ({
-      ...prev,
-      stories: prev.stories.map((s) => ({ ...s, average: null })),
-      activeStoryId: null,
-      phase: 'setup' as GamePhase,
-      revealed: false,
-      round: 1,
-      players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null })),
-    }));
+    updateState((prev) => {
+      const stories = prev.stories.map((s) => ({ ...s, average: null }));
+      const firstVotable = stories.find((s) => s.enabled);
+      return {
+        ...prev,
+        stories,
+        activeStoryId: firstVotable?.id ?? null,
+        phase: 'voting' as GamePhase,
+        revealed: false,
+        round: 1,
+        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
+      };
+    });
   }, [updateState]);
 
   return {
@@ -452,11 +591,12 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     denyPlayer,
     kickPlayer,
     castHostVote,
+    castHostActive,
     error,
     addStory,
     removeStory,
     toggleStory,
-    startVoting,
+    renameStory,
     nextStory,
     newSprint,
   };

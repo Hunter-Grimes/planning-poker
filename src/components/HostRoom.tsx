@@ -17,19 +17,35 @@ function SprintBacklog({
   stories,
   activeStoryId,
   phase,
+  revealed,
   onAdd,
   onRemove,
   onToggle,
+  onRename,
 }: {
   stories: Story[];
   activeStoryId: string | null;
   phase: GamePhase;
+  revealed: boolean;
   onAdd: (label: string) => void;
   onRemove: (id: string) => void;
   onToggle: (id: string) => void;
+  onRename: (id: string, label: string) => void;
 }) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+
+  const startEdit = (id: string, label: string) => {
+    setEditingId(id);
+    setEditDraft(label);
+  };
+  const commitEdit = () => {
+    if (editingId !== null) onRename(editingId, editDraft);
+    setEditingId(null);
+  };
+  const cancelEdit = () => setEditingId(null);
 
   const handleAdd = () => {
     const trimmed = draft.trim();
@@ -41,23 +57,55 @@ function SprintBacklog({
 
   const canManage = phase !== 'summary';
 
+  const [open, setOpen] = useState(false);
+  const doneCount = stories.filter((s) => s.average !== null).length;
+
   return (
     <div>
-      <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-        Components
-      </h2>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls="components-panel"
+        className="w-full flex items-center justify-between text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <svg
+            className={['w-3 h-3 transition-transform', open ? 'rotate-90' : ''].join(' ')}
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 2l4 4-4 4" />
+          </svg>
+          Components
+          <span className="normal-case tracking-normal text-xs text-gray-400 dark:text-gray-500 font-normal">
+            ({doneCount}/{stories.length})
+          </span>
+        </span>
+      </button>
 
-      {stories.length === 0 && (
-        <p className="text-gray-500 dark:text-gray-600 text-sm mb-3">No components yet. Add one below.</p>
-      )}
+      {!open ? null : (
+        <div id="components-panel">
+          {stories.length === 0 && (
+            <p className="text-gray-500 dark:text-gray-600 text-sm mb-3">No components yet. Add one below.</p>
+          )}
 
-      {stories.length > 0 && (
-        <div className="flex flex-col gap-1.5 mb-3">
+          {stories.length > 0 && (
+            <div className="flex flex-col gap-1.5 mb-3">
           {stories.map((story) => {
             const isActive = story.id === activeStoryId;
             const isDone = story.average !== null;
-            const canDelete = canManage && !isActive;
-            const canToggle = canManage && !isActive && !isDone;
+            // While votes are revealed, the active component is locked — removing
+            // or disabling it mid-reveal is disallowed (rename is still fine).
+            const lockedActive = isActive && revealed;
+            const canDelete = canManage && !lockedActive;
+            const canToggle = canManage && !isDone && !lockedActive;
+            const isEditing = editingId === story.id;
 
             return (
               <div
@@ -94,28 +142,55 @@ function SprintBacklog({
                   <span className="flex-none w-5" />
                 )}
 
-                <span
-                  className={[
-                    'flex-1 truncate',
-                    isActive
-                      ? 'text-gray-900 dark:text-white font-medium'
-                      : isDone
-                        ? 'text-gray-500 dark:text-gray-400'
-                        : !story.enabled
-                          ? 'text-gray-400 dark:text-gray-600'
-                          : 'text-gray-700 dark:text-gray-300',
-                  ].join(' ')}
-                >
-                  {story.label}
-                </span>
+                {isEditing && isActive ? (
+                  <input
+                    autoFocus
+                    value={editDraft}
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitEdit();
+                      else if (e.key === 'Escape') cancelEdit();
+                    }}
+                    onBlur={commitEdit}
+                    maxLength={120}
+                    className="flex-1 min-w-0 bg-transparent border-b border-indigo-400 dark:border-indigo-500 text-gray-900 dark:text-white outline-none px-0.5"
+                  />
+                ) : (
+                  <span
+                    className={[
+                      'flex-1 truncate',
+                      isActive
+                        ? 'text-gray-900 dark:text-white font-medium'
+                        : isDone
+                          ? 'text-gray-500 dark:text-gray-400'
+                          : !story.enabled
+                            ? 'text-gray-400 dark:text-gray-600'
+                            : 'text-gray-700 dark:text-gray-300',
+                    ].join(' ')}
+                  >
+                    {story.label}
+                  </span>
+                )}
 
                 {isDone && (
                   <span className="flex-none text-xs text-gray-500 dark:text-gray-400 font-mono tabular-nums">
                     {story.average !== null ? story.average.toFixed(1) : '—'}
                   </span>
                 )}
-                {isActive && (
-                  <span className="flex-none text-xs text-indigo-600 dark:text-indigo-400 font-medium">Active</span>
+                {isActive && !isEditing && (
+                  <>
+                    <button
+                      onClick={() => startEdit(story.id, story.label)}
+                      title="Rename"
+                      aria-label="Rename component"
+                      className="flex-none text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z" />
+                      </svg>
+                    </button>
+                    <span className="flex-none text-xs text-indigo-600 dark:text-indigo-400 font-medium">Active</span>
+                  </>
                 )}
 
                 {canDelete && (
@@ -133,24 +208,26 @@ function SprintBacklog({
         </div>
       )}
 
-      {canManage && (
-        <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            placeholder="Add a component…"
-            maxLength={120}
-            className="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-          <button
-            onClick={handleAdd}
-            disabled={!draft.trim()}
-            className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white text-sm px-3 py-2 rounded-lg transition-colors"
-          >
-            Add
-          </button>
+          {canManage && (
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                placeholder="Add a component…"
+                maxLength={120}
+                className="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-500"
+              />
+              <button
+                onClick={handleAdd}
+                disabled={!draft.trim()}
+                className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white text-sm px-3 py-2 rounded-lg transition-colors"
+              >
+                Add
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -201,11 +278,12 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
     denyPlayer,
     kickPlayer,
     castHostVote,
+    castHostActive,
     error,
     addStory,
     removeStory,
     toggleStory,
-    startVoting,
+    renameStory,
     nextStory,
     newSprint,
   } = usePeerHost(hostName, {
@@ -252,19 +330,46 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
 
   const handleClose = () => {
     storage.clearHost();
+    storage.clearStories();
     onClose();
   };
 
-  const copyCode = () => {
+  const copyCode = async () => {
     if (!roomId) return;
-    navigator.clipboard.writeText(roomId).then(() => {
+    const showCopied = () => {
       setCopied(true);
       if (copyTimeoutRef.current !== null) clearTimeout(copyTimeoutRef.current);
       copyTimeoutRef.current = setTimeout(() => {
         setCopied(false);
         copyTimeoutRef.current = null;
       }, 2000);
-    });
+    };
+    // Modern path
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(roomId);
+        showCopied();
+        return;
+      } catch {
+        // fall through to legacy
+      }
+    }
+    // Legacy / insecure-context fallback so users still get feedback.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = roomId;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showCopied();
+    } catch {
+      // Last resort: still flip the indicator so the click isn't silent.
+      showCopied();
+    }
   };
 
   const connectedCount = gameState.players.filter((p) => p.connected).length;
@@ -284,7 +389,6 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
   );
 
   const activeStory = gameState.stories.find((s) => s.id === gameState.activeStoryId);
-  const enabledCount = gameState.stories.filter((s) => s.enabled).length;
 
   if (error) {
     return (
@@ -311,47 +415,67 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6 gap-2">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold">Planning Poker</h1>
-            <p className="text-gray-500 dark:text-gray-400 text-sm">
-              {gameState.phase === 'summary'
-                ? 'Estimate complete'
-                : gameState.phase === 'voting'
-                  ? `Round ${gameState.round} · You're the host`
-                  : "You're the host"}
-            </p>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8 flex flex-col">
+      <div className="max-w-2xl w-full mx-auto flex-1 flex flex-col">
+        {/* Header card */}
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            {gameState.phase === 'voting' ? (
+              <>
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
+                  Round
+                </span>
+                <span className="text-2xl font-bold tabular-nums text-gray-900 dark:text-white leading-none">
+                  {gameState.round}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Estimate complete
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button
+              onClick={copyCode}
+              title="Copy room code"
+              aria-label={copied ? 'Room code copied' : 'Copy room code'}
+              className={[
+                'flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border transition-colors',
+                copied
+                  ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700',
+              ].join(' ')}
+              aria-live="polite"
+            >
+              {copied ? (
+                <>
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 8l3.5 3.5L13 5" />
+                  </svg>
+                  <span className="font-semibold tracking-wide">Code copied</span>
+                </>
+              ) : (
+                <>
+                  <span className="font-mono font-semibold tracking-[0.15em] text-gray-900 dark:text-white">
+                    {roomId}
+                  </span>
+                  <svg className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                    <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H4.5A1.5 1.5 0 0 0 3 3.5v6A1.5 1.5 0 0 0 4.5 11H5" />
+                  </svg>
+                </>
+              )}
+            </button>
             <ThemeToggle />
-            <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700">
-              {connectedCount} player{connectedCount !== 1 ? 's' : ''}
-            </span>
             <button
               onClick={handleClose}
               className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-red-100 dark:hover:bg-red-950 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-800 transition-colors"
-              title="Close session"
+              title="Close Room"
             >
-              Close session
+              Close Room
             </button>
           </div>
-        </div>
-
-        {/* Room code — compact pill */}
-        <div className="mb-6 flex items-center gap-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
-          <span className="text-xs text-gray-500 dark:text-gray-500 uppercase tracking-wide font-medium">Code</span>
-          <span className="font-mono font-semibold tracking-[0.15em] text-gray-900 dark:text-white">{roomId}</span>
-          <button
-            onClick={copyCode}
-            title="Copy room code"
-            aria-label="Copy room code"
-            className="ml-auto text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded transition-colors"
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
         </div>
 
         {/* Currently voting banner */}
@@ -401,10 +525,10 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
         <div className="mb-6">
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             {gameState.phase === 'voting'
-              ? `Players (${votedCount}/${connectedCount} voted)`
+              ? `${votedCount}/${connectedCount} voted`
               : `Players (${connectedCount})`}
           </h2>
-          <PlayerList gameState={gameState} myId={roomId} onKick={kickPlayer} />
+          <PlayerList gameState={gameState} myId={roomId} hostId={gameState.hostId} onKick={kickPlayer} />
         </div>
 
         {/* Sprint summary */}
@@ -423,7 +547,13 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
             <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
               Your vote
             </h2>
-            <CardDeck selected={myVote} onSelect={handleVote} disabled={gameState.revealed} />
+            <CardDeck
+              selected={myVote}
+              onSelect={handleVote}
+              onActivate={castHostActive}
+              stageKey={`${gameState.round}-${gameState.activeStoryId ?? 'none'}`}
+              disabled={gameState.revealed}
+            />
           </div>
         )}
 
@@ -434,46 +564,56 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
               stories={gameState.stories}
               activeStoryId={gameState.activeStoryId}
               phase={gameState.phase}
+              revealed={gameState.revealed}
               onAdd={addStory}
               onRemove={removeStory}
               onToggle={toggleStory}
+              onRename={renameStory}
             />
           </div>
         )}
 
         {/* Controls */}
-        <div className="flex gap-3">
-          {gameState.phase === 'setup' && (
-            <button
-              onClick={startVoting}
-              disabled={enabledCount === 0}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
-            >
-              {enabledCount === 0 ? 'Add components to start' : 'Start Voting'}
-            </button>
-          )}
-
+        <div className="flex gap-3 mt-auto pt-6">
           {gameState.phase === 'voting' && !gameState.revealed && (
             <>
               <button
-                onClick={handleReveal}
+                onClick={handleNewRound}
                 disabled={votedCount === 0}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl py-3 transition-colors"
+                title="Reset all votes and restart this round"
+                className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white font-semibold rounded-xl py-3 px-5 transition-colors"
               >
-                {allVoted ? 'Reveal Votes' : `Reveal Votes (${votedCount}/${connectedCount})`}
+                Restart
               </button>
-              <button
-                onClick={() => setAutoReveal((v) => !v)}
-                title="Auto-reveal when all players have voted"
-                className={[
-                  'px-4 rounded-xl border font-semibold text-sm transition-colors',
-                  autoReveal
-                    ? 'bg-indigo-100 dark:bg-indigo-900 border-indigo-400 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300'
-                    : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-500',
-                ].join(' ')}
-              >
-                Auto
-              </button>
+              <div className="flex flex-1 rounded-xl overflow-hidden">
+                <button
+                  onClick={handleReveal}
+                  disabled={votedCount === 0}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 transition-colors"
+                >
+                  {allVoted ? 'Reveal Votes' : `Reveal Votes (${votedCount}/${connectedCount})`}
+                </button>
+                <button
+                  onClick={() => setAutoReveal((v) => !v)}
+                  title={autoReveal ? 'Auto-reveal is on — turn off' : 'Auto-reveal is off — turn on'}
+                  aria-pressed={autoReveal}
+                  className={[
+                    'flex items-center gap-1.5 px-4 font-semibold text-sm transition-colors border-l',
+                    autoReveal
+                      ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-700 text-white'
+                      : 'bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 border-gray-400 dark:border-gray-800 text-gray-700 dark:text-gray-300',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'w-2 h-2 rounded-full',
+                      autoReveal ? 'bg-white' : 'bg-gray-500 dark:bg-gray-500',
+                    ].join(' ')}
+                    aria-hidden
+                  />
+                  Auto
+                </button>
+              </div>
             </>
           )}
 
@@ -485,12 +625,15 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
               >
                 Re-vote
               </button>
-              <button
-                onClick={nextStory}
-                className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-xl py-3 transition-colors"
-              >
-                {hasMoreStories ? 'Next Component' : 'Finish'}
-              </button>
+              {(gameState.activeStoryId !== null ||
+                gameState.stories.some((s) => s.average !== null)) && (
+                <button
+                  onClick={nextStory}
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-xl py-3 transition-colors"
+                >
+                  {hasMoreStories ? 'Next Component' : 'Finish'}
+                </button>
+              )}
             </>
           )}
 

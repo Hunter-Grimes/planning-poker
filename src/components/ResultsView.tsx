@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { GameState } from '../types';
 
@@ -28,14 +28,20 @@ export function ResultsView({ gameState }: Props) {
   const maxFreq = Math.max(...Object.values(freq));
   const consensus = maxFreq === allVotes.length;
 
+  // Fire confetti once per reveal of a given (round, story) — otherwise
+  // re-renders after a late vote arrives can re-trigger it.
+  const revealKey = `${gameState.round}|${gameState.activeStoryId ?? ''}`;
+  const firedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!consensus) return;
+    if (firedKeyRef.current === revealKey) return;
+    firedKeyRef.current = revealKey;
     confetti({
       particleCount: 150,
       spread: 80,
       origin: { y: 0.6 },
     });
-  }, [consensus]);
+  }, [consensus, revealKey]);
 
   return (
     <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">

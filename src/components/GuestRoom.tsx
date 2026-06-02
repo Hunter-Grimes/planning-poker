@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) {
-  const { gameState, status, vote, myId, error } = usePeerClient(roomId, playerName, persistentId);
+  const { gameState, status, vote, signalActive, myId, error } = usePeerClient(roomId, playerName, persistentId);
 
   const savedRef = useRef(false);
 
@@ -102,29 +102,34 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
   }
 
   const connectedCount = gameState.players.filter((p) => p.connected).length;
-  const votedCount = gameState.players.filter((p) => p.connected && p.vote !== null).length;
+  const votedCount = gameState.players.filter(
+    (p) => p.connected && (p.hasVoted ?? p.vote !== null),
+  ).length;
   const activeStory = gameState.stories.find((s) => s.id === gameState.activeStoryId);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6 gap-2">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold">Planning Poker</h1>
-            <p className="text-gray-500 dark:text-gray-400 text-sm">
-              {gameState.phase === 'summary'
-                ? 'Estimate complete'
-                : gameState.phase === 'voting'
-                  ? `Round ${gameState.round}`
-                  : 'Waiting to start'}
-            </p>
+        {/* Header card */}
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            {gameState.phase === 'voting' ? (
+              <>
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
+                  Round
+                </span>
+                <span className="text-2xl font-bold tabular-nums text-gray-900 dark:text-white leading-none">
+                  {gameState.round}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Estimate complete
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             <ThemeToggle />
-            <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700">
-              {connectedCount} player{connectedCount !== 1 ? 's' : ''}
-            </span>
             <button
               onClick={handleLeave}
               className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 transition-colors"
@@ -148,10 +153,10 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
         <div className="mb-6">
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             {gameState.phase === 'voting'
-              ? `Players (${votedCount}/${connectedCount} voted)`
+              ? `${votedCount}/${connectedCount} voted`
               : `Players (${connectedCount})`}
           </h2>
-          <PlayerList gameState={gameState} myId={myId} />
+          <PlayerList gameState={gameState} myId={myId} hostId={gameState.hostId} />
         </div>
 
         {/* Sprint summary */}
@@ -200,17 +205,17 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
             <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
               Your vote
             </h2>
-            <CardDeck selected={myVote} onSelect={handleVote} />
+            <CardDeck
+              selected={myVote}
+              onSelect={handleVote}
+              onActivate={signalActive}
+              stageKey={`${gameState.round}-${gameState.activeStoryId ?? 'none'}`}
+            />
           </div>
         )}
         {gameState.phase === 'voting' && gameState.revealed && (
           <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
             Waiting for host to continue…
-          </p>
-        )}
-        {gameState.phase === 'setup' && (
-          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
-            Waiting for host to start voting…
           </p>
         )}
         {gameState.phase === 'summary' && (

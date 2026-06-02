@@ -8,6 +8,7 @@ export interface UsePeerClientReturn {
   gameState: GameState | null;
   status: ConnectionStatus;
   vote: (value: CardValue) => void;
+  signalActive: () => void;
   myId: string | null;
   error: string | null;
 }
@@ -36,6 +37,9 @@ export function usePeerClient(roomId: string, playerName: string, persistentId: 
       });
 
       conn.on('data', (raw) => {
+        // Only trust data arriving on the host connection — peer-to-guest
+        // direct connects are rejected below, but defense-in-depth here too.
+        if (conn !== connRef.current) return;
         if (!isPeerMessage(raw)) return;
         if (raw.type === 'state') setGameState(raw.state);
         if (raw.type === 'approved') setStatus('connected');
@@ -49,6 +53,18 @@ export function usePeerClient(roomId: string, playerName: string, persistentId: 
       conn.on('error', (err) => {
         setError(err.message);
         setStatus('error');
+      });
+    });
+
+    // Reject incoming P2P connections from anyone other than the host. Other
+    // guests should never be able to push state/messages to us directly.
+    peer.on('connection', (incoming) => {
+      incoming.on('open', () => {
+        try {
+          incoming.close();
+        } catch {
+          // best-effort
+        }
       });
     });
 
@@ -80,5 +96,12 @@ export function usePeerClient(roomId: string, playerName: string, persistentId: 
     }
   }, []);
 
-  return { gameState, status, vote, myId, error };
+  const signalActive = useCallback(() => {
+    if (connRef.current?.open) {
+      const msg: PeerMessage = { type: 'active' };
+      connRef.current.send(msg);
+    }
+  }, []);
+
+  return { gameState, status, vote, signalActive, myId, error };
 }

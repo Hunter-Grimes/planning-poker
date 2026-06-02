@@ -4,6 +4,7 @@ import { getCardColors } from '../cardColors';
 interface Props {
   gameState: GameState;
   myId: string | null;
+  hostId: string | null;
   onKick?: (peerId: string) => void;
 }
 
@@ -11,20 +12,25 @@ function PlayerCard({
   player,
   revealed,
   isMe,
+  isHost,
   onKick,
 }: {
   player: Player;
   revealed: boolean;
   isMe: boolean;
+  isHost: boolean;
   onKick?: (peerId: string) => void;
 }) {
-  const hasVoted = player.vote !== null;
+  const hasVoted = player.hasVoted ?? player.vote !== null;
   const showKick = !!onKick && !isMe;
   const showVote = revealed && hasVoted;
+  const showActive = !hasVoted && !!player.active;
 
   const bodyClass = showVote
     ? getCardColors(player.vote!).soft
-    : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
+    : showActive
+      ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-500 dark:text-indigo-300'
+      : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
 
   return (
     <div
@@ -46,6 +52,22 @@ function PlayerCard({
             : 'text-gray-800 dark:text-gray-200',
         ].join(' ')}
       >
+        {isHost && (
+          <svg
+            className="flex-none w-3 h-3 text-gray-500 dark:text-gray-400"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-label="Host"
+            role="img"
+          >
+            <title>Host</title>
+            <path d="M2.5 5.5l2 5h7l2-5-3 2-2.5-3.5-2.5 3.5-3-2z" />
+          </svg>
+        )}
         <span className="truncate" title={player.name}>
           {player.name}
         </span>
@@ -75,6 +97,8 @@ function PlayerCard({
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
+            role="img"
+            aria-label={`${player.name} has voted`}
             strokeWidth="3"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -83,17 +107,29 @@ function PlayerCard({
           </svg>
         ) : !player.connected ? (
           <span className="text-xs uppercase tracking-wide">offline</span>
+        ) : showActive ? (
+          <span
+            className="text-3xl font-bold text-indigo-500 dark:text-indigo-300 animate-pulse"
+            aria-label={`${player.name} is considering`}
+          >
+            …
+          </span>
         ) : (
-          <span className="text-3xl font-bold text-gray-400 dark:text-gray-600">…</span>
+          <span
+            className="text-3xl font-bold text-gray-400 dark:text-gray-600"
+            aria-label={`${player.name} is waiting`}
+          >
+            …
+          </span>
         )}
       </div>
     </div>
   );
 }
 
-export function PlayerList({ gameState, myId, onKick }: Props) {
+export function PlayerList({ gameState, myId, hostId, onKick }: Props) {
   return (
-    <div className="flex flex-wrap gap-3 justify-center sm:justify-start">
+    <div className="flex flex-wrap gap-3 justify-center">
       {gameState.players
         .filter((p) => p.connected || gameState.revealed)
         .map((player) => (
@@ -102,6 +138,7 @@ export function PlayerList({ gameState, myId, onKick }: Props) {
             player={player}
             revealed={gameState.revealed}
             isMe={player.id === myId}
+            isHost={player.id === hostId}
             onKick={onKick}
           />
         ))}
