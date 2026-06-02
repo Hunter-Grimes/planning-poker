@@ -31,7 +31,12 @@ function openHost(options = {}): { result: HookResult; peer: FakePeer } {
   return { result, peer };
 }
 
-function requestJoin(peer: FakePeer, id: string, name: string, persistentId: string): FakeConnection {
+function requestJoin(
+  peer: FakePeer,
+  id: string,
+  name: string,
+  persistentId: string,
+): FakeConnection {
   const conn = new FakeConnection(id);
   act(() => peer.fireConnection(conn));
   act(() => conn.fireOpen());
@@ -39,7 +44,13 @@ function requestJoin(peer: FakePeer, id: string, name: string, persistentId: str
   return conn;
 }
 
-function join(result: HookResult, peer: FakePeer, id: string, name: string, persistentId: string): FakeConnection {
+function join(
+  result: HookResult,
+  peer: FakePeer,
+  id: string,
+  name: string,
+  persistentId: string,
+): FakeConnection {
   const conn = requestJoin(peer, id, name, persistentId);
   act(() => result.current.approvePlayer(id));
   return conn;
@@ -47,8 +58,9 @@ function join(result: HookResult, peer: FakePeer, id: string, name: string, pers
 
 /** The most recent broadcast state a connection received. */
 function lastState(conn: FakeConnection): GameState {
-  const states = conn.sent.filter((m): m is { type: 'state'; state: GameState } =>
-    !!m && typeof m === 'object' && (m as { type?: string }).type === 'state',
+  const states = conn.sent.filter(
+    (m): m is { type: 'state'; state: GameState } =>
+      !!m && typeof m === 'object' && (m as { type?: string }).type === 'state',
   );
   return states[states.length - 1].state;
 }
@@ -90,9 +102,7 @@ describe('usePeerHost — joining', () => {
 
     const dup = requestJoin(peer, 'guest2', 'alice', 'pid-b'); // case-insensitive clash
     expect(result.current.pendingPlayers).toHaveLength(0);
-    expect(dup.sent).toContainEqual(
-      expect.objectContaining({ type: 'rejected' }),
-    );
+    expect(dup.sent).toContainEqual(expect.objectContaining({ type: 'rejected' }));
   });
 
   it('auto-approves a previously-approved persistent id without queueing', () => {

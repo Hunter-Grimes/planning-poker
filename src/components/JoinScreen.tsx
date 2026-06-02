@@ -19,10 +19,14 @@ export function JoinScreen({ roomId, onJoin }: Props) {
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🃏</div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Join Room</h1>
-          <p className="text-3xl font-bold font-mono tracking-[0.2em] text-indigo-600 dark:text-indigo-400 mt-2">{roomId}</p>
+          <p className="text-3xl font-bold font-mono tracking-[0.2em] text-indigo-600 dark:text-indigo-400 mt-2">
+            {roomId}
+          </p>
         </div>
 
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Your name</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Your name
+        </label>
         <input
           type="text"
           value={name}

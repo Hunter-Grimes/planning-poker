@@ -4,264 +4,19 @@ import { CardDeck } from './CardDeck';
 import { PlayerList } from './PlayerList';
 import { ResultsView } from './ResultsView';
 import { ThemeToggle } from './ThemeToggle';
-import { CardValue, GamePhase, Story } from '../types';
+import { RoomHeader } from './RoomHeader';
+import { VotingBanner } from './VotingBanner';
+import { SprintBacklog } from './SprintBacklog';
+import { SprintSummary } from './SprintSummary';
+import { CenteredMessage } from './CenteredMessage';
+import { CardValue } from '../types';
+import { cn } from '../cn';
 import { storage } from '../storage';
 
 interface Props {
   hostName: string;
   roomCode?: string;
   onClose: () => void;
-}
-
-function SprintBacklog({
-  stories,
-  activeStoryId,
-  phase,
-  revealed,
-  onAdd,
-  onRemove,
-  onToggle,
-  onRename,
-}: {
-  stories: Story[];
-  activeStoryId: string | null;
-  phase: GamePhase;
-  revealed: boolean;
-  onAdd: (label: string) => void;
-  onRemove: (id: string) => void;
-  onToggle: (id: string) => void;
-  onRename: (id: string, label: string) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-
-  const startEdit = (id: string, label: string) => {
-    setEditingId(id);
-    setEditDraft(label);
-  };
-  const commitEdit = () => {
-    if (editingId !== null) onRename(editingId, editDraft);
-    setEditingId(null);
-  };
-  const cancelEdit = () => setEditingId(null);
-
-  const handleAdd = () => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    onAdd(trimmed);
-    setDraft('');
-    inputRef.current?.focus();
-  };
-
-  const canManage = phase !== 'summary';
-
-  const [open, setOpen] = useState(false);
-  const doneCount = stories.filter((s) => s.average !== null).length;
-
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-controls="components-panel"
-        className="w-full flex items-center justify-between text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-      >
-        <span className="flex items-center gap-2">
-          <svg
-            className={['w-3 h-3 transition-transform', open ? 'rotate-90' : ''].join(' ')}
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M4 2l4 4-4 4" />
-          </svg>
-          Components
-          <span className="normal-case tracking-normal text-xs text-gray-400 dark:text-gray-500 font-normal">
-            ({doneCount}/{stories.length})
-          </span>
-        </span>
-      </button>
-
-      {!open ? null : (
-        <div id="components-panel">
-          {stories.length === 0 && (
-            <p className="text-gray-500 dark:text-gray-600 text-sm mb-3">No components yet. Add one below.</p>
-          )}
-
-          {stories.length > 0 && (
-            <div className="flex flex-col gap-1.5 mb-3">
-          {stories.map((story) => {
-            const isActive = story.id === activeStoryId;
-            const isDone = story.average !== null;
-            // While votes are revealed, the active component is locked — removing
-            // or disabling it mid-reveal is disallowed (rename is still fine).
-            const lockedActive = isActive && revealed;
-            const canDelete = canManage && !lockedActive;
-            const canToggle = canManage && !isDone && !lockedActive;
-            const isEditing = editingId === story.id;
-
-            return (
-              <div
-                key={story.id}
-                className={[
-                  'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm',
-                  isActive
-                    ? 'bg-indigo-50 dark:bg-indigo-950 border-indigo-300 dark:border-indigo-700'
-                    : isDone
-                      ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800'
-                      : !story.enabled
-                        ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800 opacity-40'
-                        : 'bg-gray-100 dark:bg-gray-900 border-gray-300 dark:border-gray-700',
-                ].join(' ')}
-              >
-                {canToggle ? (
-                  <button
-                    onClick={() => onToggle(story.id)}
-                    title={story.enabled ? 'Exclude from voting' : 'Include in voting'}
-                    className={[
-                      'flex-none w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0',
-                      story.enabled
-                        ? 'bg-indigo-600 border-indigo-500'
-                        : 'bg-transparent border-gray-400 dark:border-gray-600 hover:border-gray-600 dark:hover:border-gray-400',
-                    ].join(' ')}
-                  >
-                    {story.enabled && (
-                      <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </button>
-                ) : (
-                  <span className="flex-none w-5" />
-                )}
-
-                {isEditing && isActive ? (
-                  <input
-                    autoFocus
-                    value={editDraft}
-                    onChange={(e) => setEditDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitEdit();
-                      else if (e.key === 'Escape') cancelEdit();
-                    }}
-                    onBlur={commitEdit}
-                    maxLength={120}
-                    className="flex-1 min-w-0 bg-transparent border-b border-indigo-400 dark:border-indigo-500 text-gray-900 dark:text-white outline-none px-0.5"
-                  />
-                ) : (
-                  <span
-                    className={[
-                      'flex-1 truncate',
-                      isActive
-                        ? 'text-gray-900 dark:text-white font-medium'
-                        : isDone
-                          ? 'text-gray-500 dark:text-gray-400'
-                          : !story.enabled
-                            ? 'text-gray-400 dark:text-gray-600'
-                            : 'text-gray-700 dark:text-gray-300',
-                    ].join(' ')}
-                  >
-                    {story.label}
-                  </span>
-                )}
-
-                {isDone && (
-                  <span className="flex-none text-xs text-gray-500 dark:text-gray-400 font-mono tabular-nums">
-                    {story.average !== null ? story.average.toFixed(1) : '—'}
-                  </span>
-                )}
-                {isActive && !isEditing && (
-                  <>
-                    <button
-                      onClick={() => startEdit(story.id, story.label)}
-                      title="Rename"
-                      aria-label="Rename component"
-                      className="flex-none text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                    >
-                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z" />
-                      </svg>
-                    </button>
-                    <span className="flex-none text-xs text-indigo-600 dark:text-indigo-400 font-medium">Active</span>
-                  </>
-                )}
-
-                {canDelete && (
-                  <button
-                    onClick={() => onRemove(story.id)}
-                    title="Remove component"
-                    className="flex-none text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition-colors text-lg leading-none"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-          {canManage && (
-            <div className="flex gap-2">
-              <input
-                ref={inputRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-                placeholder="Add a component…"
-                maxLength={120}
-                className="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-500"
-              />
-              <button
-                onClick={handleAdd}
-                disabled={!draft.trim()}
-                className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white text-sm px-3 py-2 rounded-lg transition-colors"
-              >
-                Add
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SprintSummary({ stories }: { stories: Story[] }) {
-  const voted = stories.filter((s) => s.enabled && s.average !== null);
-  const total = voted.reduce((sum, s) => sum + s.average!, 0);
-
-  return (
-    <div className="mb-6">
-      <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-        Estimate Summary
-      </h2>
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-        {voted.map((story) => (
-          <div
-            key={story.id}
-            className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 last:border-0"
-          >
-            <span className="text-sm text-gray-700 dark:text-gray-300 truncate mr-4">{story.label}</span>
-            <span className="text-sm font-mono text-gray-900 dark:text-white flex-none">
-              {story.average!.toFixed(1)}
-            </span>
-          </div>
-        ))}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-100 dark:bg-gray-800">
-          <span className="text-sm font-semibold text-gray-900 dark:text-white">Total</span>
-          <span className="text-sm font-mono font-bold text-gray-900 dark:text-white">{total.toFixed(1)}</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function HostRoom({ hostName, roomCode, onClose }: Props) {
@@ -306,7 +61,11 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
     if (roomId) {
       const existing = storage.getHost();
       if (!existing || existing.roomCode !== roomId) {
-        storage.saveHost({ hostName, roomCode: roomId, approvedPlayers: existing?.approvedPlayers ?? {} });
+        storage.saveHost({
+          hostName,
+          roomCode: roomId,
+          approvedPlayers: existing?.approvedPlayers ?? {},
+        });
       }
     }
   }, [roomId, hostName]);
@@ -392,101 +151,90 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-600 dark:text-red-400 mb-4">Connection error: {error}</p>
-          <button
-            onClick={handleClose}
-            className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
-          >
-            Back to Home
-          </button>
-        </div>
-      </div>
+      <CenteredMessage>
+        <p className="text-red-600 dark:text-red-400 mb-4">Connection error: {error}</p>
+        <button
+          onClick={handleClose}
+          className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
+        >
+          Back to Home
+        </button>
+      </CenteredMessage>
     );
   }
 
   if (!roomId) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+      <CenteredMessage>
         <p className="text-gray-500 dark:text-gray-400 animate-pulse">Creating room…</p>
-      </div>
+      </CenteredMessage>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8 flex flex-col">
       <div className="max-w-2xl w-full mx-auto flex-1 flex flex-col">
-        {/* Header card */}
-        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 shadow-sm">
-          <div className="flex items-center gap-2 min-w-0">
-            {gameState.phase === 'voting' ? (
+        <RoomHeader phase={gameState.phase} round={gameState.round}>
+          <button
+            onClick={copyCode}
+            title="Copy room code"
+            aria-label={copied ? 'Room code copied' : 'Copy room code'}
+            className={cn(
+              'flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border transition-colors',
+              copied
+                ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700',
+            )}
+            aria-live="polite"
+          >
+            {copied ? (
               <>
-                <span className="text-[10px] uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
-                  Round
-                </span>
-                <span className="text-2xl font-bold tabular-nums text-gray-900 dark:text-white leading-none">
-                  {gameState.round}
-                </span>
+                <svg
+                  className="w-3.5 h-3.5"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 8l3.5 3.5L13 5" />
+                </svg>
+                <span className="font-semibold tracking-wide">Code copied</span>
               </>
             ) : (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Estimate complete
-              </span>
+              <>
+                <span className="font-mono font-semibold tracking-[0.15em] text-gray-900 dark:text-white">
+                  {roomId}
+                </span>
+                <svg
+                  className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                  <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H4.5A1.5 1.5 0 0 0 3 3.5v6A1.5 1.5 0 0 0 4.5 11H5" />
+                </svg>
+              </>
             )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <button
-              onClick={copyCode}
-              title="Copy room code"
-              aria-label={copied ? 'Room code copied' : 'Copy room code'}
-              className={[
-                'flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border transition-colors',
-                copied
-                  ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700',
-              ].join(' ')}
-              aria-live="polite"
-            >
-              {copied ? (
-                <>
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M3 8l3.5 3.5L13 5" />
-                  </svg>
-                  <span className="font-semibold tracking-wide">Code copied</span>
-                </>
-              ) : (
-                <>
-                  <span className="font-mono font-semibold tracking-[0.15em] text-gray-900 dark:text-white">
-                    {roomId}
-                  </span>
-                  <svg className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="5" y="5" width="8" height="8" rx="1.5" />
-                    <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H4.5A1.5 1.5 0 0 0 3 3.5v6A1.5 1.5 0 0 0 4.5 11H5" />
-                  </svg>
-                </>
-              )}
-            </button>
-            <ThemeToggle />
-            <button
-              onClick={handleClose}
-              className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-red-100 dark:hover:bg-red-950 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-800 transition-colors"
-              title="Close Room"
-            >
-              Close Room
-            </button>
-          </div>
-        </div>
+          </button>
+          <ThemeToggle />
+          <button
+            onClick={handleClose}
+            className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-red-100 dark:hover:bg-red-950 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-800 transition-colors"
+            title="Close Room"
+          >
+            Close Room
+          </button>
+        </RoomHeader>
 
-        {/* Currently voting banner */}
-        {gameState.phase === 'voting' && activeStory && (
-          <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl px-4 py-3 mb-6">
-            <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium uppercase tracking-wide mb-0.5">
-              Currently voting
-            </p>
-            <p className="text-gray-900 dark:text-white font-semibold">{activeStory.label}</p>
-          </div>
-        )}
+        {gameState.phase === 'voting' && activeStory && <VotingBanner label={activeStory.label} />}
 
         {/* Pending approvals */}
         {pendingPlayers.length > 0 && (
@@ -500,7 +248,9 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
                   key={p.id}
                   className="flex items-center justify-between px-4 py-3 rounded-xl border bg-yellow-50 dark:bg-gray-900 border-yellow-300 dark:border-yellow-700"
                 >
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.name}</span>
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {p.name}
+                  </span>
                   <div className="flex gap-2">
                     <button
                       onClick={() => approvePlayer(p.id)}
@@ -528,7 +278,12 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
               ? `${votedCount}/${connectedCount} voted`
               : `Players (${connectedCount})`}
           </h2>
-          <PlayerList gameState={gameState} myId={roomId} hostId={gameState.hostId} onKick={kickPlayer} />
+          <PlayerList
+            gameState={gameState}
+            myId={roomId}
+            hostId={gameState.hostId}
+            onKick={kickPlayer}
+          />
         </div>
 
         {/* Sprint summary */}
@@ -595,20 +350,22 @@ export function HostRoom({ hostName, roomCode, onClose }: Props) {
                 </button>
                 <button
                   onClick={() => setAutoReveal((v) => !v)}
-                  title={autoReveal ? 'Auto-reveal is on — turn off' : 'Auto-reveal is off — turn on'}
+                  title={
+                    autoReveal ? 'Auto-reveal is on — turn off' : 'Auto-reveal is off — turn on'
+                  }
                   aria-pressed={autoReveal}
-                  className={[
+                  className={cn(
                     'flex items-center gap-1.5 px-4 font-semibold text-sm transition-colors border-l',
                     autoReveal
                       ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-700 text-white'
                       : 'bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 border-gray-400 dark:border-gray-800 text-gray-700 dark:text-gray-300',
-                  ].join(' ')}
+                  )}
                 >
                   <span
-                    className={[
+                    className={cn(
                       'w-2 h-2 rounded-full',
                       autoReveal ? 'bg-white' : 'bg-gray-500 dark:bg-gray-500',
-                    ].join(' ')}
+                    )}
                     aria-hidden
                   />
                   Auto

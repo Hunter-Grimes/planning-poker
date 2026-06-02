@@ -13,7 +13,11 @@ export interface UsePeerClientReturn {
   error: string | null;
 }
 
-export function usePeerClient(roomId: string, playerName: string, persistentId: string): UsePeerClientReturn {
+export function usePeerClient(
+  roomId: string,
+  playerName: string,
+  persistentId: string,
+): UsePeerClientReturn {
   const connRef = useRef<DataConnection | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const [myId, setMyId] = useState<string | null>(null);

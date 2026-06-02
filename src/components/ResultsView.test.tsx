@@ -45,9 +45,7 @@ describe('ResultsView', () => {
 
   it('fires again for a new round', () => {
     const players = [voter('Alice', 5), voter('Bob', 5)];
-    const { rerender } = render(
-      <ResultsView gameState={makeGameState({ round: 1, players })} />,
-    );
+    const { rerender } = render(<ResultsView gameState={makeGameState({ round: 1, players })} />);
     expect(confettiMock).toHaveBeenCalledTimes(1);
 
     rerender(<ResultsView gameState={makeGameState({ round: 2, players })} />);

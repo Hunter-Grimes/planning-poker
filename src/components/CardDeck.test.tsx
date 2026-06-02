@@ -53,7 +53,13 @@ describe('CardDeck', () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();
     render(
-      <CardDeck selected={null} onSelect={vi.fn()} onActivate={onActivate} stageKey="round-1" disabled />,
+      <CardDeck
+        selected={null}
+        onSelect={vi.fn()}
+        onActivate={onActivate}
+        stageKey="round-1"
+        disabled
+      />,
     );
     await user.hover(screen.getByRole('button', { name: '3' }));
     expect(onActivate).not.toHaveBeenCalled();

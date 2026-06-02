@@ -1,5 +1,6 @@
-import { GameState, Player } from '../types';
+import { GameState, Player, playerHasVoted } from '../types';
 import { getCardColors } from '../cardColors';
+import { cn } from '../cn';
 
 interface Props {
   gameState: GameState;
@@ -21,7 +22,7 @@ function PlayerCard({
   isHost: boolean;
   onKick?: (peerId: string) => void;
 }) {
-  const hasVoted = player.hasVoted ?? player.vote !== null;
+  const hasVoted = playerHasVoted(player);
   const showKick = !!onKick && !isMe;
   const showVote = revealed && hasVoted;
   const showActive = !hasVoted && !!player.active;
@@ -34,23 +35,21 @@ function PlayerCard({
 
   return (
     <div
-      className={[
+      className={cn(
         'relative w-28 h-36 rounded-2xl shadow-md flex flex-col items-center pt-3 pb-4',
         bodyClass,
         !player.connected && 'opacity-50',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      )}
     >
       {/* Name pill */}
       <div
-        className={[
+        className={cn(
           'flex items-center gap-1 px-2.5 py-1 max-w-[90%] rounded-full shadow-sm text-xs font-medium',
           'bg-white dark:bg-gray-900',
           isMe
             ? 'text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-400 dark:ring-indigo-600'
             : 'text-gray-800 dark:text-gray-200',
-        ].join(' ')}
+        )}
       >
         {isHost && (
           <svg
@@ -78,7 +77,14 @@ function PlayerCard({
             aria-label={`Remove ${player.name}`}
             className="flex-none flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:text-white hover:bg-red-500 transition-colors"
           >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
               <path d="M3 3l6 6M9 3l-6 6" />
             </svg>
           </button>
@@ -88,9 +94,7 @@ function PlayerCard({
       {/* Vote / state */}
       <div className="flex-1 flex items-center justify-center w-full">
         {showVote ? (
-          <span className="text-5xl font-bold tabular-nums select-none">
-            {String(player.vote)}
-          </span>
+          <span className="text-5xl font-bold tabular-nums select-none">{String(player.vote)}</span>
         ) : hasVoted ? (
           <svg
             className="w-10 h-10 text-emerald-600 dark:text-emerald-400"

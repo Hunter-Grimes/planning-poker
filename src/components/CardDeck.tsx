@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { CardValue, FIBONACCI_CARDS } from '../types';
 import { CARD_COLORS } from '../cardColors';
+import { cn } from '../cn';
 
 interface Props {
   selected: CardValue | null;
@@ -33,7 +34,7 @@ export function CardDeck({ selected, onSelect, onActivate, stageKey, disabled = 
             onClick={() => !disabled && onSelect(card)}
             onMouseEnter={handleMouseEnter}
             disabled={disabled}
-            className={[
+            className={cn(
               'w-16 h-24 rounded-xl text-xl font-bold border-2 transition-all duration-150 select-none overflow-hidden',
               disabled
                 ? 'cursor-default'
@@ -45,7 +46,7 @@ export function CardDeck({ selected, onSelect, onActivate, stageKey, disabled = 
                 : disabled
                   ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-500'
                   : colors.idle,
-            ].join(' ')}
+            )}
           >
             {String(card)}
           </button>

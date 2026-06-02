@@ -42,10 +42,7 @@ describe('PlayerList', () => {
     const user = userEvent.setup();
     const onKick = vi.fn();
     const state = makeGameState({
-      players: [
-        makePlayer({ id: 'me', name: 'Me' }),
-        makePlayer({ id: 'other', name: 'Other' }),
-      ],
+      players: [makePlayer({ id: 'me', name: 'Me' }), makePlayer({ id: 'other', name: 'Other' })],
     });
     render(<PlayerList gameState={state} myId="me" hostId="me" onKick={onKick} />);
 

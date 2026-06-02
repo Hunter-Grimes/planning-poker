@@ -10,8 +10,17 @@ import {
   isPeerMessage,
   randomId,
   MAX_PLAYERS,
+  MAX_STORY_LABEL_LENGTH,
 } from '../types';
 import * as game from '../gameLogic';
+
+// Send a rejection message, then close shortly after so the message has time to
+// flush across the data channel before the connection tears down.
+function rejectAndClose(conn: DataConnection, reason: string): void {
+  if (!conn.open) return;
+  conn.send({ type: 'rejected', reason } satisfies PeerMessage);
+  setTimeout(() => conn.close(), 200);
+}
 
 export interface UsePeerHostOptions {
   roomCode?: string;
@@ -197,7 +206,9 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           // User supplied a code we still can't claim — surface it instead of
           // silently switching the user to a different room.
           if (userSuppliedCode && peerId === userSuppliedCode) {
-            setError(`Room code "${peerId}" is currently unavailable. Please close this room and create a new one.`);
+            setError(
+              `Room code "${peerId}" is currently unavailable. Please close this room and create a new one.`,
+            );
             return;
           }
           // Auto-generated code collision (rare): fall back to a fresh code.
@@ -229,10 +240,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         // Cap by player count (host is in `players` but not in `connectionsRef`),
         // so use MAX_PLAYERS - 1 against the conn map.
         if (connectionsRef.current.size >= MAX_PLAYERS - 1) {
-          conn.on('open', () => {
-            conn.send({ type: 'rejected', reason: 'Room is full' });
-            setTimeout(() => conn.close(), 200);
-          });
+          conn.on('open', () => rejectAndClose(conn, 'Room is full'));
           return;
         }
 
@@ -262,13 +270,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
                 name,
               )
             ) {
-              if (conn.open) {
-                conn.send({
-                  type: 'rejected',
-                  reason: 'That name is already in use. Please choose another.',
-                } satisfies PeerMessage);
-                setTimeout(() => conn.close(), 200);
-              }
+              rejectAndClose(conn, 'That name is already in use. Please choose another.');
               return;
             }
 
@@ -321,9 +323,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           peerToPersistentIdRef.current.delete(conn.peer);
           updateState((prev) => ({
             ...prev,
-            players: prev.players.map((p) =>
-              p.id === conn.peer ? { ...p, connected: false } : p,
-            ),
+            players: prev.players.map((p) => (p.id === conn.peer ? { ...p, connected: false } : p)),
           }));
         });
       });
@@ -334,55 +334,55 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     return () => {
       peerRef.current?.destroy();
     };
-    // hostName is read via hostNameRef so renaming doesn't tear down the room.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // hostName and options are read via refs so renaming / prop changes don't
+    // tear down the peer and room — updateState is the only real dependency.
   }, [updateState]);
 
-  const approvePlayer = useCallback((peerId: string) => {
-    const conn = pendingConnsRef.current.get(peerId);
-    const pending = pendingDataRef.current.get(peerId);
-    if (!conn || !pending) return;
+  const approvePlayer = useCallback(
+    (peerId: string) => {
+      const conn = pendingConnsRef.current.get(peerId);
+      const pending = pendingDataRef.current.get(peerId);
+      if (!conn || !pending) return;
 
-    pendingConnsRef.current.delete(peerId);
-    pendingDataRef.current.delete(peerId);
-    setPendingPlayers((prev) => prev.filter((p) => p.id !== peerId));
+      pendingConnsRef.current.delete(peerId);
+      pendingDataRef.current.delete(peerId);
+      setPendingPlayers((prev) => prev.filter((p) => p.id !== peerId));
 
-    doApprove(conn, peerId, pending.persistentId, pending.name);
-  }, [doApprove]);
+      doApprove(conn, peerId, pending.persistentId, pending.name);
+    },
+    [doApprove],
+  );
 
   const denyPlayer = useCallback((peerId: string) => {
     const conn = pendingConnsRef.current.get(peerId);
     pendingConnsRef.current.delete(peerId);
     pendingDataRef.current.delete(peerId);
     setPendingPlayers((prev) => prev.filter((p) => p.id !== peerId));
-    if (conn?.open) {
-      conn.send({ type: 'rejected', reason: 'Host denied your request' } satisfies PeerMessage);
-      setTimeout(() => conn.close(), 200);
-    }
+    if (conn) rejectAndClose(conn, 'Host denied your request');
   }, []);
 
-  const kickPlayer = useCallback((peerId: string) => {
-    const conn = connectionsRef.current.get(peerId);
-    const persistentId = peerToPersistentIdRef.current.get(peerId);
+  const kickPlayer = useCallback(
+    (peerId: string) => {
+      const conn = connectionsRef.current.get(peerId);
+      const persistentId = peerToPersistentIdRef.current.get(peerId);
 
-    connectionsRef.current.delete(peerId);
-    peerToPersistentIdRef.current.delete(peerId);
+      connectionsRef.current.delete(peerId);
+      peerToPersistentIdRef.current.delete(peerId);
 
-    updateState((prev) => ({
-      ...prev,
-      players: prev.players.filter((p) => p.id !== peerId),
-    }));
+      updateState((prev) => ({
+        ...prev,
+        players: prev.players.filter((p) => p.id !== peerId),
+      }));
 
-    if (conn?.open) {
-      conn.send({ type: 'rejected', reason: 'You were removed by the host' } satisfies PeerMessage);
-      setTimeout(() => conn.close(), 200);
-    }
+      if (conn) rejectAndClose(conn, 'You were removed by the host');
 
-    if (persistentId) {
-      approvedIdsRef.current!.delete(persistentId);
-      optionsRef.current.onKick?.(persistentId);
-    }
-  }, [updateState]);
+      if (persistentId) {
+        approvedIdsRef.current!.delete(persistentId);
+        optionsRef.current.onKick?.(persistentId);
+      }
+    },
+    [updateState],
+  );
 
   const castHostVote = useCallback(
     (value: CardValue | null) => {
@@ -411,26 +411,38 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     updateState((prev) => game.newRound(prev));
   }, [updateState]);
 
-  const addStory = useCallback((label: string) => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
-    const story: Story = { id: randomId(), label: trimmed, enabled: true, average: null };
-    updateState((prev) => game.addStory(prev, story));
-  }, [updateState]);
+  const addStory = useCallback(
+    (label: string) => {
+      const trimmed = label.trim().slice(0, MAX_STORY_LABEL_LENGTH);
+      if (!trimmed) return;
+      const story: Story = { id: randomId(), label: trimmed, enabled: true, average: null };
+      updateState((prev) => game.addStory(prev, story));
+    },
+    [updateState],
+  );
 
-  const removeStory = useCallback((id: string) => {
-    updateState((prev) => game.removeStory(prev, id));
-  }, [updateState]);
+  const removeStory = useCallback(
+    (id: string) => {
+      updateState((prev) => game.removeStory(prev, id));
+    },
+    [updateState],
+  );
 
-  const toggleStory = useCallback((id: string) => {
-    updateState((prev) => game.toggleStory(prev, id));
-  }, [updateState]);
+  const toggleStory = useCallback(
+    (id: string) => {
+      updateState((prev) => game.toggleStory(prev, id));
+    },
+    [updateState],
+  );
 
-  const renameStory = useCallback((id: string, label: string) => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
-    updateState((prev) => game.renameStory(prev, id, trimmed));
-  }, [updateState]);
+  const renameStory = useCallback(
+    (id: string, label: string) => {
+      const trimmed = label.trim().slice(0, MAX_STORY_LABEL_LENGTH);
+      if (!trimmed) return;
+      updateState((prev) => game.renameStory(prev, id, trimmed));
+    },
+    [updateState],
+  );
 
   const nextStory = useCallback(() => {
     updateState((prev) => game.nextStory(prev));

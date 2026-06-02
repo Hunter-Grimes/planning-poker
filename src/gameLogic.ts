@@ -39,9 +39,7 @@ export function computeAverage(players: Player[]): number | null {
 // True when every connected player who voted picked the same card. False when
 // nobody has voted.
 export function detectConsensus(players: Player[]): boolean {
-  const allVotes = players
-    .filter((p) => p.vote !== null && p.connected)
-    .map((p) => p.vote!);
+  const allVotes = players.filter((p) => p.vote !== null && p.connected).map((p) => p.vote!);
   if (allVotes.length === 0) return false;
   const freq = allVotes.reduce<Record<string, number>>((acc, v) => {
     const k = String(v);
@@ -93,11 +91,13 @@ export function reveal(state: GameState): GameState {
 }
 
 // Clear votes/active and drop players who are still disconnected — they sat out
-// the prior round and shouldn't accumulate across rounds.
+// the prior round and shouldn't accumulate across rounds. Bumps the round
+// counter: each re-vote on the active story is the next round.
 export function newRound(state: GameState): GameState {
   return {
     ...state,
     revealed: false,
+    round: state.round + 1,
     players: state.players
       .filter((p) => p.connected)
       .map((p) => ({ ...p, vote: null, active: false })),
@@ -128,7 +128,10 @@ export function toggleStory(state: GameState, id: string): GameState {
 
   if (state.activeStoryId === id && toggled && !toggled.enabled) {
     // Disabled the active story — hand off to the next votable one.
-    activeStoryId = nextVotableAfter(stories, stories.findIndex((s) => s.id === id));
+    activeStoryId = nextVotableAfter(
+      stories,
+      stories.findIndex((s) => s.id === id),
+    );
   } else if (
     activeStoryId === null &&
     toggled &&
@@ -156,9 +159,7 @@ export function nextStory(state: GameState): GameState {
   let stories = state.stories;
   if (state.activeStoryId !== null) {
     const average = computeAverage(state.players);
-    stories = state.stories.map((s) =>
-      s.id === state.activeStoryId ? { ...s, average } : s,
-    );
+    stories = state.stories.map((s) => (s.id === state.activeStoryId ? { ...s, average } : s));
   }
 
   const currentIdx = stories.findIndex((s) => s.id === state.activeStoryId);
@@ -205,6 +206,9 @@ export function newSprint(state: GameState): GameState {
   };
 }
 
+// `value` may be null to clear a vote. Guests can only ever send a concrete
+// CardValue (the 'vote' PeerMessage carries no null), so in practice only the
+// host clears votes locally — guests deselect by re-voting.
 export function castVote(state: GameState, peerId: string, value: CardValue | null): GameState {
   return {
     ...state,

@@ -25,7 +25,9 @@ export function HomeScreen({ onCreateRoom, onJoinRoom }: Props) {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Planning Poker</h1>
         </div>
 
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Your name</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Your name
+        </label>
         <input
           type="text"
           value={name}
@@ -52,7 +54,9 @@ export function HomeScreen({ onCreateRoom, onJoinRoom }: Props) {
 
           <div className="flex items-center gap-3">
             <div className="flex-1 border-t border-gray-300 dark:border-gray-700" />
-            <span className="text-xs text-gray-500 dark:text-gray-600 uppercase tracking-wide">or</span>
+            <span className="text-xs text-gray-500 dark:text-gray-600 uppercase tracking-wide">
+              or
+            </span>
             <div className="flex-1 border-t border-gray-300 dark:border-gray-700" />
           </div>
 
@@ -64,7 +68,9 @@ export function HomeScreen({ onCreateRoom, onJoinRoom }: Props) {
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''))}
-              onKeyDown={(e) => e.key === 'Enter' && canJoin && onJoinRoom(code.trim(), name.trim())}
+              onKeyDown={(e) =>
+                e.key === 'Enter' && canJoin && onJoinRoom(code.trim(), name.trim())
+              }
               maxLength={6}
               placeholder="Room code"
               className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-lg px-4 py-2.5 border border-gray-300 dark:border-gray-600 focus:outline-none focus:border-emerald-500 mb-3 font-mono tracking-widest text-center uppercase placeholder-gray-400 dark:placeholder-gray-600 placeholder:tracking-normal placeholder:font-sans"

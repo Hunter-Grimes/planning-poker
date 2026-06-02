@@ -3,6 +3,7 @@ export type CardValue = 1 | 2 | 3 | 5 | 8 | 13 | 21 | 34 | '?';
 export const FIBONACCI_CARDS: CardValue[] = [1, 2, 3, 5, 8, 13, 21, 34, '?'];
 
 export const MAX_NAME_LENGTH = 64;
+export const MAX_STORY_LABEL_LENGTH = 120;
 export const MAX_PLAYERS = 10;
 
 // crypto.randomUUID is only exposed in secure contexts. Fall back to a
@@ -34,6 +35,13 @@ export interface Player {
   active?: boolean;
 }
 
+// Whether a player has voted, honouring the redaction contract: broadcasts to
+// clients carry `hasVoted` (the value itself is hidden pre-reveal), while the
+// host's local state only has `vote`. Prefer the explicit flag when present.
+export function playerHasVoted(player: Player): boolean {
+  return player.hasVoted ?? player.vote !== null;
+}
+
 export interface Story {
   id: string;
   label: string;
@@ -53,7 +61,8 @@ function isPlayer(v: unknown): v is Player {
   if (typeof v !== 'object' || v === null) return false;
   const p = v as Record<string, unknown>;
   if (typeof p.id !== 'string' || p.id.length === 0) return false;
-  if (typeof p.name !== 'string' || p.name.length === 0 || p.name.length > MAX_NAME_LENGTH) return false;
+  if (typeof p.name !== 'string' || p.name.length === 0 || p.name.length > MAX_NAME_LENGTH)
+    return false;
   if (typeof p.connected !== 'boolean') return false;
   if (p.vote !== null && !isCardValue(p.vote)) return false;
   if (p.hasVoted !== undefined && typeof p.hasVoted !== 'boolean') return false;
@@ -67,7 +76,8 @@ function isStory(v: unknown): v is Story {
   if (typeof s.id !== 'string' || s.id.length === 0) return false;
   if (typeof s.label !== 'string') return false;
   if (typeof s.enabled !== 'boolean') return false;
-  if (s.average !== null && (typeof s.average !== 'number' || !Number.isFinite(s.average))) return false;
+  if (s.average !== null && (typeof s.average !== 'number' || !Number.isFinite(s.average)))
+    return false;
   return true;
 }
 
@@ -97,7 +107,7 @@ export interface GameState {
 }
 
 export interface PendingEntry {
-  id: string;         // PeerJS peer ID
+  id: string; // PeerJS peer ID
   name: string;
   persistentId: string;
 }

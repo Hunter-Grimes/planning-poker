@@ -83,12 +83,16 @@ describe('isPeerMessage', () => {
     });
 
     it('rejects a state with a bad player', () => {
-      const state = makeGameState({ players: [{ id: '', name: 'x', vote: null, connected: true }] });
+      const state = makeGameState({
+        players: [{ id: '', name: 'x', vote: null, connected: true }],
+      });
       expect(isPeerMessage({ type: 'state', state })).toBe(false);
     });
 
     it('rejects a state with an invalid vote on a player', () => {
-      const state = makeGameState({ players: [{ id: 'p', name: 'x', vote: 7, connected: true } as never] });
+      const state = makeGameState({
+        players: [{ id: 'p', name: 'x', vote: 7, connected: true } as never],
+      });
       expect(isPeerMessage({ type: 'state', state })).toBe(false);
     });
 

@@ -29,9 +29,7 @@ describe('computeAverage', () => {
   });
 
   it('ignores disconnected players', () => {
-    expect(
-      computeAverage([voter('a', 2), voter('b', 8, { connected: false })]),
-    ).toBe(2);
+    expect(computeAverage([voter('a', 2), voter('b', 8, { connected: false })])).toBe(2);
   });
 
   it('ignores players who have not voted', () => {
@@ -68,7 +66,11 @@ describe('detectConsensus', () => {
 
   it('ignores non-voters and disconnected players', () => {
     expect(
-      detectConsensus([voter('a', 8), makePlayer({ vote: null }), voter('b', 8, { connected: false })]),
+      detectConsensus([
+        voter('a', 8),
+        makePlayer({ vote: null }),
+        voter('b', 8, { connected: false }),
+      ]),
     ).toBe(true);
   });
 
@@ -191,6 +193,11 @@ describe('newRound', () => {
     });
     expect(newRound(state).players.map((p) => p.name)).toEqual(['a']);
   });
+
+  it('increments the round counter', () => {
+    expect(newRound(makeGameState({ round: 1 })).round).toBe(2);
+    expect(newRound(makeGameState({ round: 4 })).round).toBe(5);
+  });
 });
 
 describe('addStory', () => {
@@ -275,6 +282,16 @@ describe('nextStory', () => {
     expect(next.activeStoryId).toBe('s2');
     expect(next.phase).toBe('voting');
     expect(next.players[0].vote).toBeNull();
+  });
+
+  it('resets the round counter to 1 on the next story', () => {
+    const state = makeGameState({
+      round: 5,
+      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
+      activeStoryId: 's1',
+      players: [voter('a', 3)],
+    });
+    expect(nextStory(state).round).toBe(1);
   });
 
   it('moves to the summary phase when no votable story remains', () => {

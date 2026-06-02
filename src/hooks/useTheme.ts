@@ -9,7 +9,9 @@ function getStored(): ThemePreference {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === 'light' || raw === 'dark' || raw === 'system') return raw;
-  } catch {}
+  } catch {
+    // localStorage unavailable (e.g. private mode) — fall back to system.
+  }
   return 'system';
 }
 
@@ -35,7 +37,9 @@ export function useTheme() {
     setResolved(applyTheme(preference));
     try {
       localStorage.setItem(STORAGE_KEY, preference);
-    } catch {}
+    } catch {
+      // localStorage unavailable — preference just won't persist across reloads.
+    }
   }, [preference]);
 
   useEffect(() => {

@@ -12,7 +12,10 @@ type AppState =
   | { screen: 'join-form'; roomId: string }
   | { screen: 'guest'; roomId: string; playerName: string; persistentId: string };
 
-function getInitialState(): AppState {
+// Decide which screen to open on first load. NOTE: this also has a side effect —
+// it clears orphaned stories when there's no host session to own them (see
+// below). Called once via the lazy useState initializer.
+function resolveInitialState(): AppState {
   // URL param takes priority (shared invite link)
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
@@ -43,7 +46,7 @@ function getInitialState(): AppState {
 }
 
 export function App() {
-  const [state, setState] = useState<AppState>(getInitialState);
+  const [state, setState] = useState<AppState>(resolveInitialState);
 
   const goHome = () => setState({ screen: 'home' });
 
@@ -80,13 +83,7 @@ export function App() {
   }
 
   if (state.screen === 'hosting') {
-    return (
-      <HostRoom
-        hostName={state.hostName}
-        roomCode={state.roomCode}
-        onClose={goHome}
-      />
-    );
+    return <HostRoom hostName={state.hostName} roomCode={state.roomCode} onClose={goHome} />;
   }
 
   if (state.screen === 'guest') {
