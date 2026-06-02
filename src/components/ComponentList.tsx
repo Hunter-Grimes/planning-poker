@@ -1,25 +1,32 @@
 import { useState, useRef } from 'react';
-import { GamePhase, MAX_STORY_LABEL_LENGTH, Story } from '../types';
+import { GamePhase, MAX_COMPONENT_LABEL_LENGTH, Component } from '../types';
 import { cn } from '../cn';
+import { Button, HEADING_BASE, HEADING_TONES, Input } from './ui';
 
 interface Props {
-  stories: Story[];
-  activeStoryId: string | null;
+  components: Component[];
+  activeComponentId: string | null;
   phase: GamePhase;
   revealed: boolean;
+  // Open/closed is controlled by the parent so it survives this component
+  // unmounting between phases.
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onAdd: (label: string) => void;
   onRemove: (id: string) => void;
   onToggle: (id: string) => void;
   onRename: (id: string, label: string) => void;
 }
 
-// Collapsible component/story list for the host: add, rename, include/exclude,
-// and remove stories, with the active and already-estimated ones called out.
-export function SprintBacklog({
-  stories,
-  activeStoryId,
+// Collapsible component/component list for the host: add, rename, include/exclude,
+// and remove components, with the active and already-estimated ones called out.
+export function ComponentList({
+  components,
+  activeComponentId,
   phase,
   revealed,
+  open,
+  onOpenChange,
   onAdd,
   onRemove,
   onToggle,
@@ -29,7 +36,6 @@ export function SprintBacklog({
   const inputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [open, setOpen] = useState(false);
 
   const startEdit = (id: string, label: string) => {
     setEditingId(id);
@@ -46,20 +52,27 @@ export function SprintBacklog({
     if (!trimmed) return;
     onAdd(trimmed);
     setDraft('');
-    inputRef.current?.focus();
+    // preventScroll: keep the viewport put — the list just grew above this
+    // field, and re-focusing without this would jump/scroll the page.
+    inputRef.current?.focus({ preventScroll: true });
   };
 
   const canManage = phase !== 'summary';
-  const doneCount = stories.filter((s) => s.average !== null).length;
+  const doneCount = components.filter((s) => s.average !== null).length;
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onOpenChange(!open)}
         aria-expanded={open}
         aria-controls="components-panel"
-        className="w-full flex items-center justify-between text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+        className={cn(
+          'w-full flex items-center justify-between mb-3 transition-colors',
+          HEADING_BASE,
+          HEADING_TONES.default,
+          'hover:text-gray-700 dark:hover:text-gray-200',
+        )}
       >
         <span className="flex items-center gap-2">
           <svg
@@ -76,57 +89,57 @@ export function SprintBacklog({
           </svg>
           Components
           <span className="normal-case tracking-normal text-xs text-gray-400 dark:text-gray-500 font-normal">
-            ({doneCount}/{stories.length})
+            ({doneCount}/{components.length})
           </span>
         </span>
       </button>
 
       {open && (
         <div id="components-panel">
-          {stories.length === 0 && (
+          {components.length === 0 && (
             <p className="text-gray-500 dark:text-gray-600 text-sm mb-3">
               No components yet. Add one below.
             </p>
           )}
 
-          {stories.length > 0 && (
+          {components.length > 0 && (
             <div className="flex flex-col gap-1.5 mb-3">
-              {stories.map((story) => {
-                const isActive = story.id === activeStoryId;
-                const isDone = story.average !== null;
+              {components.map((component) => {
+                const isActive = component.id === activeComponentId;
+                const isDone = component.average !== null;
                 // While votes are revealed, the active component is locked — removing
                 // or disabling it mid-reveal is disallowed (rename is still fine).
                 const lockedActive = isActive && revealed;
                 const canDelete = canManage && !lockedActive;
                 const canToggle = canManage && !isDone && !lockedActive;
-                const isEditing = editingId === story.id;
+                const isEditing = editingId === component.id;
 
                 return (
                   <div
-                    key={story.id}
+                    key={component.id}
                     className={cn(
                       'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm',
                       isActive
                         ? 'bg-indigo-50 dark:bg-indigo-950 border-indigo-300 dark:border-indigo-700'
                         : isDone
                           ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800'
-                          : !story.enabled
+                          : !component.enabled
                             ? 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800 opacity-40'
                             : 'bg-gray-100 dark:bg-gray-900 border-gray-300 dark:border-gray-700',
                     )}
                   >
                     {canToggle ? (
                       <button
-                        onClick={() => onToggle(story.id)}
-                        title={story.enabled ? 'Exclude from voting' : 'Include in voting'}
+                        onClick={() => onToggle(component.id)}
+                        title={component.enabled ? 'Exclude from voting' : 'Include in voting'}
                         className={cn(
                           'flex-none w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0',
-                          story.enabled
+                          component.enabled
                             ? 'bg-indigo-600 border-indigo-500'
                             : 'bg-transparent border-gray-400 dark:border-gray-600 hover:border-gray-600 dark:hover:border-gray-400',
                         )}
                       >
-                        {story.enabled && (
+                        {component.enabled && (
                           <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none">
                             <path
                               d="M2 6l3 3 5-5"
@@ -143,7 +156,8 @@ export function SprintBacklog({
                     )}
 
                     {isEditing && isActive ? (
-                      <input
+                      <Input
+                        variant="inline"
                         autoFocus
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
@@ -152,8 +166,7 @@ export function SprintBacklog({
                           else if (e.key === 'Escape') cancelEdit();
                         }}
                         onBlur={commitEdit}
-                        maxLength={MAX_STORY_LABEL_LENGTH}
-                        className="flex-1 min-w-0 bg-transparent border-b border-indigo-400 dark:border-indigo-500 text-gray-900 dark:text-white outline-none px-0.5"
+                        maxLength={MAX_COMPONENT_LABEL_LENGTH}
                       />
                     ) : (
                       <span
@@ -163,24 +176,24 @@ export function SprintBacklog({
                             ? 'text-gray-900 dark:text-white font-medium'
                             : isDone
                               ? 'text-gray-500 dark:text-gray-400'
-                              : !story.enabled
+                              : !component.enabled
                                 ? 'text-gray-400 dark:text-gray-600'
                                 : 'text-gray-700 dark:text-gray-300',
                         )}
                       >
-                        {story.label}
+                        {component.label}
                       </span>
                     )}
 
                     {isDone && (
                       <span className="flex-none text-xs text-gray-500 dark:text-gray-400 font-mono tabular-nums">
-                        {story.average !== null ? story.average.toFixed(1) : '—'}
+                        {component.average !== null ? component.average.toFixed(1) : '—'}
                       </span>
                     )}
                     {isActive && !isEditing && (
                       <>
                         <button
-                          onClick={() => startEdit(story.id, story.label)}
+                          onClick={() => startEdit(component.id, component.label)}
                           title="Rename"
                           aria-label="Rename component"
                           className="flex-none text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
@@ -205,7 +218,7 @@ export function SprintBacklog({
 
                     {canDelete && (
                       <button
-                        onClick={() => onRemove(story.id)}
+                        onClick={() => onRemove(component.id)}
                         title="Remove component"
                         className="flex-none text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition-colors text-lg leading-none"
                       >
@@ -220,22 +233,18 @@ export function SprintBacklog({
 
           {canManage && (
             <div className="flex gap-2">
-              <input
-                ref={inputRef}
+              <Input
+                variant="compact"
+                inputRef={inputRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                 placeholder="Add a component…"
-                maxLength={MAX_STORY_LABEL_LENGTH}
-                className="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-500"
+                maxLength={MAX_COMPONENT_LABEL_LENGTH}
               />
-              <button
-                onClick={handleAdd}
-                disabled={!draft.trim()}
-                className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600 text-gray-900 dark:text-white text-sm px-3 py-2 rounded-lg transition-colors"
-              >
+              <Button variant="secondary" size="md" onClick={handleAdd} disabled={!draft.trim()}>
                 Add
-              </button>
+              </Button>
             </div>
           )}
         </div>

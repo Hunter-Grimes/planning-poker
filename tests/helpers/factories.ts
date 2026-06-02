@@ -1,4 +1,4 @@
-import { CardValue, GameState, Player, Story } from '../types';
+import { CardValue, GameState, Player, Component } from '../../src/types';
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}-${++seq}`;
@@ -13,10 +13,10 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
   };
 }
 
-export function makeStory(overrides: Partial<Story> = {}): Story {
+export function makeComponent(overrides: Partial<Component> = {}): Component {
   return {
-    id: overrides.id ?? nextId('story'),
-    label: overrides.label ?? 'A story',
+    id: overrides.id ?? nextId('component'),
+    label: overrides.label ?? 'A component',
     enabled: overrides.enabled ?? true,
     average: overrides.average ?? null,
     ...overrides,
@@ -28,8 +28,8 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     players: overrides.players ?? [],
     revealed: overrides.revealed ?? false,
     round: overrides.round ?? 1,
-    stories: overrides.stories ?? [],
-    activeStoryId: overrides.activeStoryId ?? null,
+    components: overrides.components ?? [],
+    activeComponentId: overrides.activeComponentId ?? null,
     phase: overrides.phase ?? 'voting',
     hostId: overrides.hostId ?? null,
     ...overrides,

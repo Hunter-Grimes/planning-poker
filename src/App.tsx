@@ -13,7 +13,7 @@ type AppState =
   | { screen: 'guest'; roomId: string; playerName: string; persistentId: string };
 
 // Decide which screen to open on first load. NOTE: this also has a side effect —
-// it clears orphaned stories when there's no host session to own them (see
+// it clears orphaned components when there's no host session to own them (see
 // below). Called once via the lazy useState initializer.
 function resolveInitialState(): AppState {
   // URL param takes priority (shared invite link)
@@ -27,9 +27,9 @@ function resolveInitialState(): AppState {
     return { screen: 'hosting', hostName: hostSession.hostName, roomCode: hostSession.roomCode };
   }
 
-  // No host session: any persisted stories are orphans from a tab close or
+  // No host session: any persisted components are orphans from a tab close or
   // crash and would otherwise resurface in a fresh room — drop them.
-  storage.clearStories();
+  storage.clearComponents();
 
   // Restore guest session if one exists
   const guestSession = storage.getGuest();

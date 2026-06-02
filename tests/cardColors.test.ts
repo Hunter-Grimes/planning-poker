@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { CARD_COLORS, getCardColors } from './cardColors';
-import { FIBONACCI_CARDS } from './types';
+import { CARD_COLORS, getCardColors } from '../src/cardColors';
+import { FIBONACCI_CARDS } from '../src/types';
 
 describe('getCardColors', () => {
   it('maps every card value to a color set', () => {

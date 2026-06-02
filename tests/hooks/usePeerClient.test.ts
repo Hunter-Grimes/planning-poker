@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { usePeerClient } from './usePeerClient';
-import { FakeConnection, lastPeer, resetPeerMock } from '../test/peerMock';
-import { PeerMessage } from '../types';
-import { makeGameState, makePlayer } from '../test/factories';
+import { usePeerClient } from '../../src/hooks/usePeerClient';
+import { FakeConnection, lastPeer, resetPeerMock } from '../helpers/peerMock';
+import { PeerMessage } from '../../src/types';
+import { makeGameState, makePlayer } from '../helpers/factories';
 
 vi.mock('peerjs', async () => {
-  const mod = await import('../test/peerMock');
+  const mod = await import('../helpers/peerMock');
   return { default: mod.FakePeer };
 });
 

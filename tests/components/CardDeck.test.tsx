@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { CardDeck } from './CardDeck';
-import { FIBONACCI_CARDS } from '../types';
+import { CardDeck } from '../../src/components/CardDeck';
+import { FIBONACCI_CARDS } from '../../src/types';
 
 describe('CardDeck', () => {
   it('renders a button for every Fibonacci card', () => {

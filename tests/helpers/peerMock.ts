@@ -4,7 +4,7 @@
 //
 // Wire it up in a test with:
 //   vi.mock('peerjs', async () => {
-//     const mod = await import('../test/peerMock');
+//     const mod = await import('../helpers/peerMock');
 //     return { default: mod.FakePeer };
 //   });
 

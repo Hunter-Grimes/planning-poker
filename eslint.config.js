@@ -29,7 +29,7 @@ export default tseslint.config(
   // Tests and the Node-side config run with Node globals and lean on a few
   // any-typed test doubles.
   {
-    files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}', '*.config.{ts,js}'],
+    files: ['tests/**/*.{ts,tsx}', '*.config.{ts,js}'],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

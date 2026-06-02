@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PlayerList } from './PlayerList';
-import { makeGameState, makePlayer } from '../test/factories';
+import { PlayerList } from '../../src/components/PlayerList';
+import { makeGameState, makePlayer } from '../helpers/factories';
 
 describe('PlayerList', () => {
   it('shows a "voted" check from the hasVoted flag even when the value is redacted', () => {

@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { GamePhase } from '../types';
+import { Card } from './ui';
 
 interface Props {
   phase: GamePhase;
@@ -13,7 +14,7 @@ interface Props {
 // the left and a caller-supplied action cluster on the right.
 export function RoomHeader({ phase, round, children }: Props) {
   return (
-    <div className="mb-6 flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 shadow-sm">
+    <Card className="mb-6 flex items-center justify-between gap-3 flex-wrap px-4 py-3 shadow-sm">
       <div className="flex items-center gap-2 min-w-0">
         {phase === 'voting' ? (
           <>
@@ -31,6 +32,6 @@ export function RoomHeader({ phase, round, children }: Props) {
         )}
       </div>
       <div className="flex items-center gap-2 flex-wrap justify-end">{children}</div>
-    </div>
+    </Card>
   );
 }

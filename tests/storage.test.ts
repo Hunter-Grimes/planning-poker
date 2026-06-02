@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { storage, HostSession, GuestSession } from './storage';
-import { makeStory } from './test/factories';
+import { storage, HostSession, GuestSession } from '../src/storage';
+import { makeComponent } from './helpers/factories';
 
 const host: HostSession = {
   hostName: 'Dana',
@@ -68,23 +68,23 @@ describe('guest session', () => {
   });
 });
 
-describe('stories', () => {
+describe('components', () => {
   it('round-trips a list', () => {
-    const stories = [makeStory({ id: 's1' }), makeStory({ id: 's2' })];
-    storage.saveStories(stories);
-    expect(storage.getStories()).toEqual(stories);
+    const components = [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })];
+    storage.saveComponents(components);
+    expect(storage.getComponents()).toEqual(components);
   });
 
   it('defaults to an empty array when absent or malformed', () => {
-    expect(storage.getStories()).toEqual([]);
-    localStorage.setItem('pp_stories', 'oops');
-    expect(storage.getStories()).toEqual([]);
+    expect(storage.getComponents()).toEqual([]);
+    localStorage.setItem('pp_components', 'oops');
+    expect(storage.getComponents()).toEqual([]);
   });
 
-  it('clears stored stories', () => {
-    storage.saveStories([makeStory()]);
-    storage.clearStories();
-    expect(storage.getStories()).toEqual([]);
+  it('clears stored components', () => {
+    storage.saveComponents([makeComponent()]);
+    storage.clearComponents();
+    expect(storage.getComponents()).toEqual([]);
   });
 });
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import confetti from 'canvas-confetti';
-import { ResultsView } from './ResultsView';
-import { makeGameState, voter } from '../test/factories';
+import { ResultsView } from '../../src/components/ResultsView';
+import { makeGameState, voter } from '../helpers/factories';
 
 vi.mock('canvas-confetti', () => ({ default: vi.fn() }));
 

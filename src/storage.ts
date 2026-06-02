@@ -1,8 +1,8 @@
-import { Story } from './types';
+import { Component } from './types';
 
 const HOST_KEY = 'pp_host';
 const GUEST_KEY = 'pp_guest';
-const STORIES_KEY = 'pp_stories';
+const COMPONENTS_KEY = 'pp_components';
 
 export interface HostSession {
   hostName: string;
@@ -56,13 +56,13 @@ export const storage = {
   clearGuest(): void {
     localStorage.removeItem(GUEST_KEY);
   },
-  getStories(): Story[] {
-    return parseJSON<Story[]>(localStorage.getItem(STORIES_KEY)) ?? [];
+  getComponents(): Component[] {
+    return parseJSON<Component[]>(localStorage.getItem(COMPONENTS_KEY)) ?? [];
   },
-  saveStories(stories: Story[]): void {
-    localStorage.setItem(STORIES_KEY, JSON.stringify(stories));
+  saveComponents(components: Component[]): void {
+    localStorage.setItem(COMPONENTS_KEY, JSON.stringify(components));
   },
-  clearStories(): void {
-    localStorage.removeItem(STORIES_KEY);
+  clearComponents(): void {
+    localStorage.removeItem(COMPONENTS_KEY);
   },
 };

@@ -6,11 +6,11 @@ import {
   PeerMessage,
   PendingEntry,
   Player,
-  Story,
+  Component,
   isPeerMessage,
   randomId,
   MAX_PLAYERS,
-  MAX_STORY_LABEL_LENGTH,
+  MAX_COMPONENT_LABEL_LENGTH,
 } from '../types';
 import * as game from '../gameLogic';
 
@@ -25,7 +25,7 @@ function rejectAndClose(conn: DataConnection, reason: string): void {
 export interface UsePeerHostOptions {
   roomCode?: string;
   approvedPlayers?: Record<string, string>; // persistentId → name
-  initialStories?: Story[];
+  initialComponents?: Component[];
   onApprove?: (persistentId: string, name: string) => void;
   onKick?: (persistentId: string) => void;
 }
@@ -36,18 +36,19 @@ export interface UsePeerHostReturn {
   pendingPlayers: PendingEntry[];
   reveal: () => void;
   newRound: () => void;
+  restartRound: () => void;
   approvePlayer: (peerId: string) => void;
   denyPlayer: (peerId: string) => void;
   kickPlayer: (peerId: string) => void;
   castHostVote: (value: CardValue | null) => void;
   castHostActive: () => void;
   error: string | null;
-  addStory: (label: string) => void;
-  removeStory: (id: string) => void;
-  toggleStory: (id: string) => void;
-  renameStory: (id: string, label: string) => void;
-  nextStory: () => void;
-  newSprint: () => void;
+  addComponent: (label: string) => void;
+  removeComponent: (id: string) => void;
+  toggleComponent: (id: string) => void;
+  renameComponent: (id: string, label: string) => void;
+  nextComponent: () => void;
+  newTicket: () => void;
 }
 
 export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}): UsePeerHostReturn {
@@ -77,14 +78,14 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   const [error, setError] = useState<string | null>(null);
   const [pendingPlayers, setPendingPlayers] = useState<PendingEntry[]>([]);
   const [gameState, setGameState] = useState<GameState>(() => {
-    const stories = options.initialStories ?? [];
-    const firstVotable = stories.find((s) => s.enabled && s.average === null);
+    const components = options.initialComponents ?? [];
+    const firstVotable = components.find((s) => s.enabled && s.average === null);
     return {
       players: [],
       revealed: false,
       round: 1,
-      stories,
-      activeStoryId: firstVotable?.id ?? null,
+      components,
+      activeComponentId: firstVotable?.id ?? null,
       phase: 'voting',
       hostId: null,
     };
@@ -411,45 +412,49 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     updateState((prev) => game.newRound(prev));
   }, [updateState]);
 
-  const addStory = useCallback(
-    (label: string) => {
-      const trimmed = label.trim().slice(0, MAX_STORY_LABEL_LENGTH);
-      if (!trimmed) return;
-      const story: Story = { id: randomId(), label: trimmed, enabled: true, average: null };
-      updateState((prev) => game.addStory(prev, story));
-    },
-    [updateState],
-  );
-
-  const removeStory = useCallback(
-    (id: string) => {
-      updateState((prev) => game.removeStory(prev, id));
-    },
-    [updateState],
-  );
-
-  const toggleStory = useCallback(
-    (id: string) => {
-      updateState((prev) => game.toggleStory(prev, id));
-    },
-    [updateState],
-  );
-
-  const renameStory = useCallback(
-    (id: string, label: string) => {
-      const trimmed = label.trim().slice(0, MAX_STORY_LABEL_LENGTH);
-      if (!trimmed) return;
-      updateState((prev) => game.renameStory(prev, id, trimmed));
-    },
-    [updateState],
-  );
-
-  const nextStory = useCallback(() => {
-    updateState((prev) => game.nextStory(prev));
+  const restartRound = useCallback(() => {
+    updateState((prev) => game.restartRound(prev));
   }, [updateState]);
 
-  const newSprint = useCallback(() => {
-    updateState((prev) => game.newSprint(prev));
+  const addComponent = useCallback(
+    (label: string) => {
+      const trimmed = label.trim().slice(0, MAX_COMPONENT_LABEL_LENGTH);
+      if (!trimmed) return;
+      const component: Component = { id: randomId(), label: trimmed, enabled: true, average: null };
+      updateState((prev) => game.addComponent(prev, component));
+    },
+    [updateState],
+  );
+
+  const removeComponent = useCallback(
+    (id: string) => {
+      updateState((prev) => game.removeComponent(prev, id));
+    },
+    [updateState],
+  );
+
+  const toggleComponent = useCallback(
+    (id: string) => {
+      updateState((prev) => game.toggleComponent(prev, id));
+    },
+    [updateState],
+  );
+
+  const renameComponent = useCallback(
+    (id: string, label: string) => {
+      const trimmed = label.trim().slice(0, MAX_COMPONENT_LABEL_LENGTH);
+      if (!trimmed) return;
+      updateState((prev) => game.renameComponent(prev, id, trimmed));
+    },
+    [updateState],
+  );
+
+  const nextComponent = useCallback(() => {
+    updateState((prev) => game.nextComponent(prev));
+  }, [updateState]);
+
+  const newTicket = useCallback(() => {
+    updateState((prev) => game.newTicket(prev));
   }, [updateState]);
 
   return {
@@ -458,17 +463,18 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     pendingPlayers,
     reveal,
     newRound,
+    restartRound,
     approvePlayer,
     denyPlayer,
     kickPlayer,
     castHostVote,
     castHostActive,
     error,
-    addStory,
-    removeStory,
-    toggleStory,
-    renameStory,
-    nextStory,
-    newSprint,
+    addComponent,
+    removeComponent,
+    toggleComponent,
+    renameComponent,
+    nextComponent,
+    newTicket,
   };
 }

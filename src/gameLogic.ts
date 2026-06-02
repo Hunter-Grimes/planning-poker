@@ -1,4 +1,4 @@
-import { CardValue, GamePhase, GameState, Player, Story } from './types';
+import { CardValue, GamePhase, GameState, Player, Component } from './types';
 
 // Signaling goes through broker.peerjs.com. Codes avoid easily-confused glyphs
 // (no 0/O/1/I) so they're easy to read aloud.
@@ -50,14 +50,14 @@ export function detectConsensus(players: Player[]): boolean {
   return maxFreq === allVotes.length;
 }
 
-// Pick the next still-votable story when the active one goes away (removed or
+// Pick the next still-votable component when the active one goes away (removed or
 // disabled). Prefer the next one forward, but fall back to ANY remaining
-// votable story so we never strand the user with votable work but no active
-// story. Returns null only when nothing is left to vote on.
-export function nextVotableAfter(stories: Story[], idx: number): string | null {
+// votable component so we never strand the user with votable work but no active
+// component. Returns null only when nothing is left to vote on.
+export function nextVotableAfter(components: Component[], idx: number): string | null {
   return (
-    stories.find((s, i) => i > idx && s.enabled && s.average === null)?.id ??
-    stories.find((s) => s.enabled && s.average === null)?.id ??
+    components.find((s, i) => i > idx && s.enabled && s.average === null)?.id ??
+    components.find((s) => s.enabled && s.average === null)?.id ??
     null
   );
 }
@@ -90,113 +90,134 @@ export function reveal(state: GameState): GameState {
   return { ...state, revealed: true };
 }
 
-// Clear votes/active and drop players who are still disconnected — they sat out
-// the prior round and shouldn't accumulate across rounds. Bumps the round
-// counter: each re-vote on the active story is the next round.
-export function newRound(state: GameState): GameState {
+// Re-do the current round in place: hide results, clear votes/active flags, and
+// drop players who are still disconnected. Does NOT advance the round counter —
+// restarting before a reveal is still the same round.
+export function restartRound(state: GameState): GameState {
   return {
     ...state,
     revealed: false,
-    round: state.round + 1,
     players: state.players
       .filter((p) => p.connected)
       .map((p) => ({ ...p, vote: null, active: false })),
   };
 }
 
-// Append `story`. If we're voting with no active story, the new one becomes
+// Start the next round on the active component: same clearing as restartRound, but
+// bumps the round counter — each re-vote after a reveal is the next round.
+export function newRound(state: GameState): GameState {
+  return { ...restartRound(state), round: state.round + 1 };
+}
+
+// Append `component`. If we're voting with no active component, the new one becomes
 // active — votes already cast stay attached.
-export function addStory(state: GameState, story: Story): GameState {
-  const stories = [...state.stories, story];
-  const activeStoryId =
-    state.activeStoryId === null && state.phase === 'voting' ? story.id : state.activeStoryId;
-  return { ...state, stories, activeStoryId };
+export function addComponent(state: GameState, component: Component): GameState {
+  const components = [...state.components, component];
+  const activeComponentId =
+    state.activeComponentId === null && state.phase === 'voting' ? component.id : state.activeComponentId;
+  return { ...state, components, activeComponentId };
 }
 
-export function removeStory(state: GameState, id: string): GameState {
-  const idx = state.stories.findIndex((s) => s.id === id);
-  const stories = state.stories.filter((s) => s.id !== id);
-  const activeStoryId =
-    state.activeStoryId === id ? nextVotableAfter(stories, idx - 1) : state.activeStoryId;
-  return { ...state, stories, activeStoryId };
+export function removeComponent(state: GameState, id: string): GameState {
+  const idx = state.components.findIndex((s) => s.id === id);
+  const components = state.components.filter((s) => s.id !== id);
+  const activeComponentId =
+    state.activeComponentId === id ? nextVotableAfter(components, idx - 1) : state.activeComponentId;
+  return { ...state, components, activeComponentId };
 }
 
-export function toggleStory(state: GameState, id: string): GameState {
-  const stories = state.stories.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
-  const toggled = stories.find((s) => s.id === id);
-  let activeStoryId = state.activeStoryId;
+export function toggleComponent(state: GameState, id: string): GameState {
+  const components = state.components.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
+  const toggled = components.find((s) => s.id === id);
+  let activeComponentId = state.activeComponentId;
 
-  if (state.activeStoryId === id && toggled && !toggled.enabled) {
-    // Disabled the active story — hand off to the next votable one.
-    activeStoryId = nextVotableAfter(
-      stories,
-      stories.findIndex((s) => s.id === id),
+  if (state.activeComponentId === id && toggled && !toggled.enabled) {
+    // Disabled the active component — hand off to the next votable one.
+    activeComponentId = nextVotableAfter(
+      components,
+      components.findIndex((s) => s.id === id),
     );
   } else if (
-    activeStoryId === null &&
+    activeComponentId === null &&
     toggled &&
     toggled.enabled &&
     toggled.average === null &&
     state.phase === 'voting'
   ) {
     // Re-enabled while nothing is active — adopt this one so voting can resume.
-    activeStoryId = id;
+    activeComponentId = id;
   }
 
-  return { ...state, stories, activeStoryId };
+  return { ...state, components, activeComponentId };
 }
 
-export function renameStory(state: GameState, id: string, label: string): GameState {
+export function renameComponent(state: GameState, id: string, label: string): GameState {
   return {
     ...state,
-    stories: state.stories.map((s) => (s.id === id ? { ...s, label } : s)),
+    components: state.components.map((s) => (s.id === id ? { ...s, label } : s)),
   };
 }
 
-// Record the active story's average, then advance to the next votable story.
-// When none remain, move to the summary phase.
-export function nextStory(state: GameState): GameState {
-  let stories = state.stories;
-  if (state.activeStoryId !== null) {
+// Record the active component's average, then advance to the next votable component.
+// When none remain, move to the summary phase — unless nothing was ever
+// estimated (no components), in which case there's nothing to summarize, so
+// skip straight to a fresh voting round (the next ticket).
+export function nextComponent(state: GameState): GameState {
+  let components = state.components;
+  if (state.activeComponentId !== null) {
     const average = computeAverage(state.players);
-    stories = state.stories.map((s) => (s.id === state.activeStoryId ? { ...s, average } : s));
+    components = state.components.map((s) => (s.id === state.activeComponentId ? { ...s, average } : s));
   }
 
-  const currentIdx = stories.findIndex((s) => s.id === state.activeStoryId);
-  const next = stories.find((s, i) => i > currentIdx && s.enabled && s.average === null);
+  const currentIdx = components.findIndex((s) => s.id === state.activeComponentId);
+  const next = components.find((s, i) => i > currentIdx && s.enabled && s.average === null);
 
   const clearedPlayers = state.players
     .filter((p) => p.connected)
     .map((p) => ({ ...p, vote: null, active: false }));
 
-  if (!next) {
+  if (next) {
     return {
       ...state,
-      stories,
-      activeStoryId: null,
-      phase: 'summary' as GamePhase,
+      components,
+      activeComponentId: next.id,
+      revealed: false,
+      round: 1,
+      players: clearedPlayers,
+    };
+  }
+
+  // Nothing left to vote on. Only show the summary if something was actually
+  // estimated; otherwise start the next ticket directly.
+  const hasEstimates = components.some((s) => s.enabled && s.average !== null);
+  if (!hasEstimates) {
+    return {
+      ...state,
+      components,
+      activeComponentId: null,
+      revealed: false,
+      round: 1,
       players: clearedPlayers,
     };
   }
 
   return {
     ...state,
-    stories,
-    activeStoryId: next.id,
-    revealed: false,
-    round: 1,
+    components,
+    activeComponentId: null,
+    phase: 'summary' as GamePhase,
     players: clearedPlayers,
   };
 }
 
-// Reset all averages and return to voting on the first enabled story.
-export function newSprint(state: GameState): GameState {
-  const stories = state.stories.map((s) => ({ ...s, average: null }));
-  const firstVotable = stories.find((s) => s.enabled);
+// Reset all averages and return to voting on the first enabled component.
+export function newTicket(state: GameState): GameState {
+  const components = state.components.map((s) => ({ ...s, average: null }));
+  const firstVotable = components.find((s) => s.enabled);
   return {
     ...state,
-    stories,
-    activeStoryId: firstVotable?.id ?? null,
+    components,
+    activeComponentId: firstVotable?.id ?? null,
     phase: 'voting' as GamePhase,
     revealed: false,
     round: 1,

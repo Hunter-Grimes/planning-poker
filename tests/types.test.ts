@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isCardValue, isPeerMessage, randomId, MAX_NAME_LENGTH } from './types';
-import { makeGameState, makePlayer, makeStory } from './test/factories';
+import { isCardValue, isPeerMessage, randomId, MAX_NAME_LENGTH } from '../src/types';
+import { makeGameState, makePlayer, makeComponent } from './helpers/factories';
 
 describe('randomId', () => {
   it('returns a non-empty string', () => {
@@ -76,7 +76,7 @@ describe('isPeerMessage', () => {
     it('accepts a well-formed state', () => {
       const state = makeGameState({
         players: [makePlayer({ vote: 5 })],
-        stories: [makeStory({ average: 3 })],
+        components: [makeComponent({ average: 3 })],
         hostId: 'host',
       });
       expect(isPeerMessage({ type: 'state', state })).toBe(true);
@@ -105,8 +105,8 @@ describe('isPeerMessage', () => {
       expect(isPeerMessage({ type: 'state', state })).toBe(false);
     });
 
-    it('rejects a story whose average is not finite', () => {
-      const state = makeGameState({ stories: [makeStory({ average: Infinity as never })] });
+    it('rejects a component whose average is not finite', () => {
+      const state = makeGameState({ components: [makeComponent({ average: Infinity as never })] });
       expect(isPeerMessage({ type: 'state', state })).toBe(false);
     });
   });

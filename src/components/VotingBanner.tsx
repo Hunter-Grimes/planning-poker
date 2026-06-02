@@ -2,7 +2,7 @@ interface Props {
   label: string;
 }
 
-// "Currently voting" banner naming the active story. Shown to host and guests
+// "Currently voting" banner naming the active component. Shown to host and guests
 // alike during the voting phase.
 export function VotingBanner({ label }: Props) {
   return (

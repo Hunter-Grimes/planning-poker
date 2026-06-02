@@ -6,8 +6,8 @@ import { ResultsView } from './ResultsView';
 import { ThemeToggle } from './ThemeToggle';
 import { RoomHeader } from './RoomHeader';
 import { VotingBanner } from './VotingBanner';
-import { SprintSummary } from './SprintSummary';
-import { CenteredMessage } from './CenteredMessage';
+import { TicketSummary } from './TicketSummary';
+import { Button, CenteredMessage, PillButton, RoomScreen, SectionHeading } from './ui';
 import { CardValue, playerHasVoted } from '../types';
 import { storage } from '../storage';
 
@@ -61,12 +61,9 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
         <p className="text-gray-500 dark:text-gray-500 text-sm mb-4">
           The host may have closed the session.
         </p>
-        <button
-          onClick={handleLeave}
-          className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
-        >
+        <Button variant="secondary" onClick={handleLeave}>
           Back to Home
-        </button>
+        </Button>
       </CenteredMessage>
     );
   }
@@ -75,12 +72,9 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
     return (
       <CenteredMessage>
         <p className="text-gray-600 dark:text-gray-400 mb-4">Disconnected from room.</p>
-        <button
-          onClick={handleLeave}
-          className="text-sm bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors"
-        >
+        <Button variant="secondary" onClick={handleLeave}>
           Back to Home
-        </button>
+        </Button>
       </CenteredMessage>
     );
   }
@@ -113,68 +107,61 @@ export function GuestRoom({ roomId, playerName, persistentId, onLeave }: Props) 
 
   const connectedCount = gameState.players.filter((p) => p.connected).length;
   const votedCount = gameState.players.filter((p) => p.connected && playerHasVoted(p)).length;
-  const activeStory = gameState.stories.find((s) => s.id === gameState.activeStoryId);
+  const activeComponent = gameState.components.find((s) => s.id === gameState.activeComponentId);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white p-4 md:p-8">
-      <div className="max-w-2xl mx-auto">
-        <RoomHeader phase={gameState.phase} round={gameState.round}>
-          <ThemeToggle />
-          <button
-            onClick={handleLeave}
-            className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 transition-colors"
-          >
-            Leave
-          </button>
-        </RoomHeader>
+    <RoomScreen>
+      <RoomHeader phase={gameState.phase} round={gameState.round}>
+        <ThemeToggle />
+        <PillButton variant="subtle" onClick={handleLeave}>
+          Leave
+        </PillButton>
+      </RoomHeader>
 
-        {gameState.phase === 'voting' && activeStory && <VotingBanner label={activeStory.label} />}
+      {gameState.phase === 'voting' && activeComponent && <VotingBanner label={activeComponent.label} />}
 
-        {/* Players */}
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            {gameState.phase === 'voting'
-              ? `${votedCount}/${connectedCount} voted`
-              : `Players (${connectedCount})`}
-          </h2>
-          <PlayerList gameState={gameState} myId={myId} hostId={gameState.hostId} />
-        </div>
-
-        {/* Sprint summary */}
-        {gameState.phase === 'summary' && <SprintSummary stories={gameState.stories} />}
-
-        {/* Results */}
-        {gameState.phase === 'voting' && gameState.revealed && (
-          <div className="mb-6">
-            <ResultsView gameState={gameState} />
-          </div>
-        )}
-
-        {/* Cards / waiting messages */}
-        {gameState.phase === 'voting' && !gameState.revealed && (
-          <div>
-            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-              Your vote
-            </h2>
-            <CardDeck
-              selected={myVote}
-              onSelect={handleVote}
-              onActivate={signalActive}
-              stageKey={`${gameState.round}-${gameState.activeStoryId ?? 'none'}`}
-            />
-          </div>
-        )}
-        {gameState.phase === 'voting' && gameState.revealed && (
-          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
-            Waiting for host to continue…
-          </p>
-        )}
-        {gameState.phase === 'summary' && (
-          <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
-            Waiting for host to start next ticket…
-          </p>
-        )}
+      {/* Players */}
+      <div className="mb-6">
+        <SectionHeading>
+          {gameState.phase === 'voting'
+            ? `${votedCount}/${connectedCount} voted`
+            : `Players (${connectedCount})`}
+        </SectionHeading>
+        <PlayerList gameState={gameState} myId={myId} hostId={gameState.hostId} />
       </div>
-    </div>
+
+      {/* Ticket summary */}
+      {gameState.phase === 'summary' && <TicketSummary components={gameState.components} />}
+
+      {/* Results */}
+      {gameState.phase === 'voting' && gameState.revealed && (
+        <div className="mb-6">
+          <ResultsView gameState={gameState} />
+        </div>
+      )}
+
+      {/* Cards / waiting messages */}
+      {gameState.phase === 'voting' && !gameState.revealed && (
+        <div>
+          <SectionHeading>Your vote</SectionHeading>
+          <CardDeck
+            selected={myVote}
+            onSelect={handleVote}
+            onActivate={signalActive}
+            stageKey={`${gameState.round}-${gameState.activeComponentId ?? 'none'}`}
+          />
+        </div>
+      )}
+      {gameState.phase === 'voting' && gameState.revealed && (
+        <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
+          Waiting for host to continue…
+        </p>
+      )}
+      {gameState.phase === 'summary' && (
+        <p className="text-center text-gray-500 dark:text-gray-500 text-sm mt-4">
+          Waiting for host to start next ticket…
+        </p>
+      )}
+    </RoomScreen>
   );
 }

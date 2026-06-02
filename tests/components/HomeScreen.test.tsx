@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { HomeScreen } from './HomeScreen';
+import { HomeScreen } from '../../src/components/HomeScreen';
 
 function setup() {
   const onCreateRoom = vi.fn();

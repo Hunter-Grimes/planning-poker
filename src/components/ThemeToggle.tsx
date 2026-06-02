@@ -1,5 +1,5 @@
 import { useTheme } from '../hooks/useTheme';
-import { cn } from '../cn';
+import { PillButton } from './ui';
 
 export function ThemeToggle({ className = '' }: { className?: string }) {
   const { preference, cycle } = useTheme();
@@ -49,19 +49,9 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
     );
 
   return (
-    <button
-      onClick={cycle}
-      title={title}
-      aria-label={title}
-      className={cn(
-        'inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border transition-colors',
-        'bg-gray-100 hover:bg-gray-200 border-gray-300 text-gray-600',
-        'dark:bg-gray-800 dark:hover:bg-gray-700 dark:border-gray-700 dark:text-gray-400',
-        className,
-      )}
-    >
+    <PillButton onClick={cycle} title={title} aria-label={title} className={className}>
       {icon}
       <span className="hidden sm:inline">{label}</span>
-    </button>
+    </PillButton>
   );
 }

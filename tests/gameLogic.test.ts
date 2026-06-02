@@ -1,23 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addStory,
+  addComponent,
   castVote,
   computeAverage,
   detectConsensus,
   generateRoomCode,
   isNameTaken,
   newRound,
-  newSprint,
-  nextStory,
+  newTicket,
+  nextComponent,
   nextVotableAfter,
   redactForClient,
-  removeStory,
-  renameStory,
+  removeComponent,
+  renameComponent,
+  restartRound,
   reveal,
   setActive,
-  toggleStory,
-} from './gameLogic';
-import { makeGameState, makePlayer, makeStory, voter } from './test/factories';
+  toggleComponent,
+} from '../src/gameLogic';
+import { makeGameState, makePlayer, makeComponent, voter } from './helpers/factories';
 
 describe('computeAverage', () => {
   it('averages numeric votes only', () => {
@@ -81,27 +82,27 @@ describe('detectConsensus', () => {
 });
 
 describe('nextVotableAfter', () => {
-  const stories = [
-    makeStory({ id: 's0', enabled: true, average: 3 }), // already voted
-    makeStory({ id: 's1', enabled: false }), // disabled
-    makeStory({ id: 's2', enabled: true, average: null }), // votable
-    makeStory({ id: 's3', enabled: true, average: null }), // votable
+  const components = [
+    makeComponent({ id: 's0', enabled: true, average: 3 }), // already voted
+    makeComponent({ id: 's1', enabled: false }), // disabled
+    makeComponent({ id: 's2', enabled: true, average: null }), // votable
+    makeComponent({ id: 's3', enabled: true, average: null }), // votable
   ];
 
-  it('prefers the next votable story after the index', () => {
-    expect(nextVotableAfter(stories, 0)).toBe('s2');
+  it('prefers the next votable component after the index', () => {
+    expect(nextVotableAfter(components, 0)).toBe('s2');
   });
 
-  it('skips disabled and already-averaged stories', () => {
-    expect(nextVotableAfter(stories, 2)).toBe('s3');
+  it('skips disabled and already-averaged components', () => {
+    expect(nextVotableAfter(components, 2)).toBe('s3');
   });
 
-  it('falls back to any earlier votable story when none remain forward', () => {
-    expect(nextVotableAfter(stories, 3)).toBe('s2');
+  it('falls back to any earlier votable component when none remain forward', () => {
+    expect(nextVotableAfter(components, 3)).toBe('s2');
   });
 
   it('returns null when nothing is votable', () => {
-    const done = [makeStory({ enabled: true, average: 5 }), makeStory({ enabled: false })];
+    const done = [makeComponent({ enabled: true, average: 5 }), makeComponent({ enabled: false })];
     expect(nextVotableAfter(done, -1)).toBeNull();
   });
 });
@@ -200,125 +201,167 @@ describe('newRound', () => {
   });
 });
 
-describe('addStory', () => {
-  it('appends the story', () => {
-    const story = makeStory({ id: 'new' });
-    expect(addStory(makeGameState(), story).stories).toContain(story);
+describe('restartRound', () => {
+  it('clears votes and active flags and hides results', () => {
+    const state = makeGameState({
+      revealed: true,
+      players: [voter('a', 5, { active: true })],
+    });
+    const next = restartRound(state);
+    expect(next.revealed).toBe(false);
+    expect(next.players[0].vote).toBeNull();
+    expect(next.players[0].active).toBe(false);
   });
 
-  it('adopts the new story as active when voting with none active', () => {
-    const story = makeStory({ id: 'new' });
-    const next = addStory(makeGameState({ activeStoryId: null, phase: 'voting' }), story);
-    expect(next.activeStoryId).toBe('new');
+  it('drops players who are still disconnected', () => {
+    const state = makeGameState({
+      players: [voter('a', 5), makePlayer({ name: 'b', connected: false })],
+    });
+    expect(restartRound(state).players.map((p) => p.name)).toEqual(['a']);
   });
 
-  it('leaves the active story untouched when one is already active', () => {
-    const story = makeStory({ id: 'new' });
-    const next = addStory(makeGameState({ activeStoryId: 'existing' }), story);
-    expect(next.activeStoryId).toBe('existing');
+  it('does NOT increment the round counter', () => {
+    expect(restartRound(makeGameState({ round: 1 })).round).toBe(1);
+    expect(restartRound(makeGameState({ round: 4 })).round).toBe(4);
   });
 });
 
-describe('removeStory', () => {
-  it('removes the story and reassigns active to the next votable', () => {
-    const state = makeGameState({
-      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
-      activeStoryId: 's1',
-    });
-    const next = removeStory(state, 's1');
-    expect(next.stories.map((s) => s.id)).toEqual(['s2']);
-    expect(next.activeStoryId).toBe('s2');
+describe('addComponent', () => {
+  it('appends the component', () => {
+    const component = makeComponent({ id: 'new' });
+    expect(addComponent(makeGameState(), component).components).toContain(component);
   });
 
-  it('keeps the active story when removing a different one', () => {
-    const state = makeGameState({
-      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
-      activeStoryId: 's2',
-    });
-    expect(removeStory(state, 's1').activeStoryId).toBe('s2');
+  it('adopts the new component as active when voting with none active', () => {
+    const component = makeComponent({ id: 'new' });
+    const next = addComponent(makeGameState({ activeComponentId: null, phase: 'voting' }), component);
+    expect(next.activeComponentId).toBe('new');
+  });
+
+  it('leaves the active component untouched when one is already active', () => {
+    const component = makeComponent({ id: 'new' });
+    const next = addComponent(makeGameState({ activeComponentId: 'existing' }), component);
+    expect(next.activeComponentId).toBe('existing');
   });
 });
 
-describe('toggleStory', () => {
-  it('hands off the active story when it is disabled', () => {
+describe('removeComponent', () => {
+  it('removes the component and reassigns active to the next votable', () => {
     const state = makeGameState({
-      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
-      activeStoryId: 's1',
+      components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
+      activeComponentId: 's1',
     });
-    const next = toggleStory(state, 's1');
-    expect(next.stories.find((s) => s.id === 's1')!.enabled).toBe(false);
-    expect(next.activeStoryId).toBe('s2');
+    const next = removeComponent(state, 's1');
+    expect(next.components.map((s) => s.id)).toEqual(['s2']);
+    expect(next.activeComponentId).toBe('s2');
   });
 
-  it('adopts a re-enabled story when nothing is active', () => {
+  it('keeps the active component when removing a different one', () => {
     const state = makeGameState({
-      stories: [makeStory({ id: 's1', enabled: false })],
-      activeStoryId: null,
+      components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
+      activeComponentId: 's2',
+    });
+    expect(removeComponent(state, 's1').activeComponentId).toBe('s2');
+  });
+});
+
+describe('toggleComponent', () => {
+  it('hands off the active component when it is disabled', () => {
+    const state = makeGameState({
+      components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
+      activeComponentId: 's1',
+    });
+    const next = toggleComponent(state, 's1');
+    expect(next.components.find((s) => s.id === 's1')!.enabled).toBe(false);
+    expect(next.activeComponentId).toBe('s2');
+  });
+
+  it('adopts a re-enabled component when nothing is active', () => {
+    const state = makeGameState({
+      components: [makeComponent({ id: 's1', enabled: false })],
+      activeComponentId: null,
       phase: 'voting',
     });
-    expect(toggleStory(state, 's1').activeStoryId).toBe('s1');
+    expect(toggleComponent(state, 's1').activeComponentId).toBe('s1');
   });
 });
 
-describe('renameStory', () => {
-  it('renames the matching story only', () => {
+describe('renameComponent', () => {
+  it('renames the matching component only', () => {
     const state = makeGameState({
-      stories: [makeStory({ id: 's1', label: 'old' }), makeStory({ id: 's2', label: 'keep' })],
+      components: [makeComponent({ id: 's1', label: 'old' }), makeComponent({ id: 's2', label: 'keep' })],
     });
-    const next = renameStory(state, 's1', 'new');
-    expect(next.stories.map((s) => s.label)).toEqual(['new', 'keep']);
+    const next = renameComponent(state, 's1', 'new');
+    expect(next.components.map((s) => s.label)).toEqual(['new', 'keep']);
   });
 });
 
-describe('nextStory', () => {
-  it('records the active storys average and advances to the next votable', () => {
+describe('nextComponent', () => {
+  it('records the active components average and advances to the next votable', () => {
     const state = makeGameState({
-      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
-      activeStoryId: 's1',
+      components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
+      activeComponentId: 's1',
       players: [voter('a', 3), voter('b', 5)],
     });
-    const next = nextStory(state);
-    expect(next.stories.find((s) => s.id === 's1')!.average).toBe(4);
-    expect(next.activeStoryId).toBe('s2');
+    const next = nextComponent(state);
+    expect(next.components.find((s) => s.id === 's1')!.average).toBe(4);
+    expect(next.activeComponentId).toBe('s2');
     expect(next.phase).toBe('voting');
     expect(next.players[0].vote).toBeNull();
   });
 
-  it('resets the round counter to 1 on the next story', () => {
+  it('resets the round counter to 1 on the next component', () => {
     const state = makeGameState({
       round: 5,
-      stories: [makeStory({ id: 's1' }), makeStory({ id: 's2' })],
-      activeStoryId: 's1',
+      components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
+      activeComponentId: 's1',
       players: [voter('a', 3)],
     });
-    expect(nextStory(state).round).toBe(1);
+    expect(nextComponent(state).round).toBe(1);
   });
 
-  it('moves to the summary phase when no votable story remains', () => {
+  it('moves to the summary phase when no votable component remains', () => {
     const state = makeGameState({
-      stories: [makeStory({ id: 's1' })],
-      activeStoryId: 's1',
+      components: [makeComponent({ id: 's1' })],
+      activeComponentId: 's1',
       players: [voter('a', 8)],
     });
-    const next = nextStory(state);
+    const next = nextComponent(state);
     expect(next.phase).toBe('summary');
-    expect(next.activeStoryId).toBeNull();
-    expect(next.stories[0].average).toBe(8);
+    expect(next.activeComponentId).toBeNull();
+    expect(next.components[0].average).toBe(8);
+  });
+
+  it('skips the summary and starts a fresh round when nothing was estimated', () => {
+    const state = makeGameState({
+      components: [],
+      activeComponentId: null,
+      revealed: true,
+      round: 3,
+      players: [voter('a', 8, { active: true })],
+    });
+    const next = nextComponent(state);
+    expect(next.phase).toBe('voting');
+    expect(next.activeComponentId).toBeNull();
+    expect(next.revealed).toBe(false);
+    expect(next.round).toBe(1);
+    expect(next.players[0].vote).toBeNull();
+    expect(next.players[0].active).toBe(false);
   });
 });
 
-describe('newSprint', () => {
-  it('clears averages and returns to voting on the first enabled story', () => {
+describe('newTicket', () => {
+  it('clears averages and returns to voting on the first enabled component', () => {
     const state = makeGameState({
       phase: 'summary',
-      stories: [makeStory({ id: 's1', average: 3 }), makeStory({ id: 's2', average: 5 })],
-      activeStoryId: null,
+      components: [makeComponent({ id: 's1', average: 3 }), makeComponent({ id: 's2', average: 5 })],
+      activeComponentId: null,
       players: [voter('a', 5)],
     });
-    const next = newSprint(state);
+    const next = newTicket(state);
     expect(next.phase).toBe('voting');
-    expect(next.stories.every((s) => s.average === null)).toBe(true);
-    expect(next.activeStoryId).toBe('s1');
+    expect(next.components.every((s) => s.average === null)).toBe(true);
+    expect(next.activeComponentId).toBe('s1');
     expect(next.players[0].vote).toBeNull();
   });
 });

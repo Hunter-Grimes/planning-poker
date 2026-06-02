@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { GuestRoom } from './GuestRoom';
-import type { UsePeerClientReturn, ConnectionStatus } from '../hooks/usePeerClient';
-import { usePeerClient } from '../hooks/usePeerClient';
-import { storage } from '../storage';
-import { makeGameState, makePlayer, makeStory } from '../test/factories';
+import { GuestRoom } from '../../src/components/GuestRoom';
+import type { UsePeerClientReturn, ConnectionStatus } from '../../src/hooks/usePeerClient';
+import { usePeerClient } from '../../src/hooks/usePeerClient';
+import { storage } from '../../src/storage';
+import { makeGameState, makePlayer, makeComponent } from '../helpers/factories';
 
 vi.mock('canvas-confetti', () => ({ default: vi.fn() }));
-vi.mock('../hooks/usePeerClient', () => ({ usePeerClient: vi.fn() }));
+vi.mock('../../src/hooks/usePeerClient', () => ({ usePeerClient: vi.fn() }));
 
 const usePeerClientMock = vi.mocked(usePeerClient);
 
@@ -91,13 +91,13 @@ describe('GuestRoom — connected gameplay', () => {
     });
   });
 
-  it('shows the round, the voted counter and the active story banner', () => {
+  it('shows the round, the voted counter and the active component banner', () => {
     renderGuest({
       status: 'connected',
       gameState: connectedState({
         round: 2,
-        activeStoryId: 's1',
-        stories: [makeStory({ id: 's1', label: 'Checkout' })],
+        activeComponentId: 's1',
+        components: [makeComponent({ id: 's1', label: 'Checkout' })],
       }),
     });
     expect(screen.getByText('2', { selector: 'span' })).toBeInTheDocument(); // round, not the "2" card
@@ -142,10 +142,10 @@ describe('GuestRoom — connected gameplay', () => {
       status: 'connected',
       gameState: connectedState({
         phase: 'summary',
-        activeStoryId: null,
-        stories: [
-          makeStory({ id: 's1', label: 'A', average: 2 }),
-          makeStory({ id: 's2', label: 'B', average: 5 }),
+        activeComponentId: null,
+        components: [
+          makeComponent({ id: 's1', label: 'A', average: 2 }),
+          makeComponent({ id: 's2', label: 'B', average: 5 }),
         ],
       }),
     });

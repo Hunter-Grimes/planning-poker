@@ -3,7 +3,7 @@ export type CardValue = 1 | 2 | 3 | 5 | 8 | 13 | 21 | 34 | '?';
 export const FIBONACCI_CARDS: CardValue[] = [1, 2, 3, 5, 8, 13, 21, 34, '?'];
 
 export const MAX_NAME_LENGTH = 64;
-export const MAX_STORY_LABEL_LENGTH = 120;
+export const MAX_COMPONENT_LABEL_LENGTH = 120;
 export const MAX_PLAYERS = 10;
 
 // crypto.randomUUID is only exposed in secure contexts. Fall back to a
@@ -42,7 +42,7 @@ export function playerHasVoted(player: Player): boolean {
   return player.hasVoted ?? player.vote !== null;
 }
 
-export interface Story {
+export interface Component {
   id: string;
   label: string;
   enabled: boolean;
@@ -70,7 +70,7 @@ function isPlayer(v: unknown): v is Player {
   return true;
 }
 
-function isStory(v: unknown): v is Story {
+function isComponent(v: unknown): v is Component {
   if (typeof v !== 'object' || v === null) return false;
   const s = v as Record<string, unknown>;
   if (typeof s.id !== 'string' || s.id.length === 0) return false;
@@ -87,8 +87,8 @@ function isGameState(v: unknown): v is GameState {
   if (!Array.isArray(s.players) || !s.players.every(isPlayer)) return false;
   if (typeof s.revealed !== 'boolean') return false;
   if (typeof s.round !== 'number' || !Number.isFinite(s.round)) return false;
-  if (!Array.isArray(s.stories) || !s.stories.every(isStory)) return false;
-  if (s.activeStoryId !== null && typeof s.activeStoryId !== 'string') return false;
+  if (!Array.isArray(s.components) || !s.components.every(isComponent)) return false;
+  if (s.activeComponentId !== null && typeof s.activeComponentId !== 'string') return false;
   if (!isGamePhase(s.phase)) return false;
   if (s.hostId !== null && typeof s.hostId !== 'string') return false;
   return true;
@@ -98,8 +98,8 @@ export interface GameState {
   players: Player[];
   revealed: boolean;
   round: number;
-  stories: Story[];
-  activeStoryId: string | null;
+  components: Component[];
+  activeComponentId: string | null;
   phase: GamePhase;
   // The host's peer id — explicitly threaded so the UI doesn't have to assume
   // it equals the room code, and clients can identify the host without props.
