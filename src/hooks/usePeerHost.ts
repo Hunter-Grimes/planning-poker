@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import {
   CardValue,
-  GamePhase,
   GameState,
   PeerMessage,
   PendingEntry,
@@ -12,6 +11,7 @@ import {
   randomId,
   MAX_PLAYERS,
 } from '../types';
+import * as game from '../gameLogic';
 
 export interface UsePeerHostOptions {
   roomCode?: string;
@@ -39,15 +39,6 @@ export interface UsePeerHostReturn {
   renameStory: (id: string, label: string) => void;
   nextStory: () => void;
   newSprint: () => void;
-}
-
-function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  // NOTE: signaling goes through broker.peerjs.com. To self-host, pass host/port/path
-  // options to `new Peer(id, options)`. See https://github.com/peers/peerserver
-  const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
 export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}): UsePeerHostReturn {
@@ -95,22 +86,10 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
 
-  const redactForClient = (state: GameState, recipientPeerId: string): GameState => ({
-    ...state,
-    players: state.players.map((p) => {
-      const reveal = state.revealed || p.id === recipientPeerId;
-      return {
-        ...p,
-        hasVoted: p.vote !== null,
-        vote: reveal ? p.vote : null,
-      };
-    }),
-  });
-
   const broadcast = useCallback((state: GameState) => {
     connectionsRef.current.forEach((conn, peerId) => {
       if (conn.open) {
-        const redacted = redactForClient(state, peerId);
+        const redacted = game.redactForClient(state, peerId);
         conn.send({ type: 'state', state: redacted } satisfies PeerMessage);
       }
     });
@@ -172,7 +151,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
 
   useEffect(() => {
     const userSuppliedCode = optionsRef.current.roomCode;
-    const code = userSuppliedCode ?? generateRoomCode();
+    const code = userSuppliedCode ?? game.generateRoomCode();
     // Retry the same code up to N times before falling back to a new one —
     // covers StrictMode double-mount and the broker's short TTL after refresh.
     let unavailableRetries = 0;
@@ -222,7 +201,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             return;
           }
           // Auto-generated code collision (rare): fall back to a fresh code.
-          setupPeer(generateRoomCode());
+          setupPeer(game.generateRoomCode());
           return;
         }
         // Non-fatal: a specific peer couldn't be reached. Logging only — keeps
@@ -271,20 +250,18 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           if (raw.type === 'request-join') {
             const { name, persistentId } = raw;
             const peerId = conn.peer;
-            const normalized = name.trim().toLowerCase();
 
             // Reject if another connected player or pending guest already holds this name.
             // A returning guest (same persistentId) is allowed to keep theirs.
-            const takenByPlayer = gameStateRef.current.players.some(
-              (p) =>
-                p.connected &&
-                peerToPersistentIdRef.current.get(p.id) !== persistentId &&
-                p.name.trim().toLowerCase() === normalized,
-            );
-            const takenByPending = [...pendingDataRef.current.values()].some(
-              (p) => p.persistentId !== persistentId && p.name.trim().toLowerCase() === normalized,
-            );
-            if (takenByPlayer || takenByPending) {
+            if (
+              game.isNameTaken(
+                gameStateRef.current.players,
+                peerToPersistentIdRef.current,
+                [...pendingDataRef.current.values()],
+                persistentId,
+                name,
+              )
+            ) {
               if (conn.open) {
                 conn.send({
                   type: 'rejected',
@@ -316,12 +293,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             // Only the currently-approved connection for this peer may vote.
             // Stale/replaced/pending connections can't trigger broadcasts.
             if (connectionsRef.current.get(conn.peer) !== conn) return;
-            updateState((prev) => ({
-              ...prev,
-              players: prev.players.map((p) =>
-                p.id === conn.peer ? { ...p, vote: raw.value } : p,
-              ),
-            }));
+            updateState((prev) => game.castVote(prev, conn.peer, raw.value));
           }
 
           if (raw.type === 'active') {
@@ -330,12 +302,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             if (connectionsRef.current.get(conn.peer) !== conn) return;
             const existing = gameStateRef.current.players.find((p) => p.id === conn.peer);
             if (!existing || existing.active) return;
-            updateState((prev) => ({
-              ...prev,
-              players: prev.players.map((p) =>
-                p.id === conn.peer ? { ...p, active: true } : p,
-              ),
-            }));
+            updateState((prev) => game.setActive(prev, conn.peer));
           }
         });
 
@@ -422,10 +389,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       const hostId = peerRef.current?.id;
       if (!hostId) return;
       if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
-      updateState((prev) => ({
-        ...prev,
-        players: prev.players.map((p) => (p.id === hostId ? { ...p, vote: value } : p)),
-      }));
+      updateState((prev) => game.castVote(prev, hostId, value));
     },
     [updateState],
   );
@@ -436,149 +400,44 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
     const me = gameStateRef.current.players.find((p) => p.id === hostId);
     if (!me || me.active) return;
-    updateState((prev) => ({
-      ...prev,
-      players: prev.players.map((p) => (p.id === hostId ? { ...p, active: true } : p)),
-    }));
+    updateState((prev) => game.setActive(prev, hostId));
   }, [updateState]);
 
   const reveal = useCallback(() => {
-    updateState((prev) => ({ ...prev, revealed: true }));
+    updateState((prev) => game.reveal(prev));
   }, [updateState]);
 
   const newRound = useCallback(() => {
-    updateState((prev) => ({
-      ...prev,
-      revealed: false,
-      // Drop players who are still disconnected — they sat out the prior round
-      // and shouldn't accumulate in the list across rounds.
-      players: prev.players
-        .filter((p) => p.connected)
-        .map((p) => ({ ...p, vote: null, active: false })),
-    }));
+    updateState((prev) => game.newRound(prev));
   }, [updateState]);
 
   const addStory = useCallback((label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
     const story: Story = { id: randomId(), label: trimmed, enabled: true, average: null };
-    updateState((prev) => {
-      const stories = [...prev.stories, story];
-      // If we're voting with no active story, the newly-added one becomes it —
-      // votes already cast stay attached.
-      const activeStoryId =
-        prev.activeStoryId === null && prev.phase === 'voting' ? story.id : prev.activeStoryId;
-      return { ...prev, stories, activeStoryId };
-    });
+    updateState((prev) => game.addStory(prev, story));
   }, [updateState]);
 
-  // Pick the next still-votable story when the active one goes away (removed or
-  // disabled). Prefer the next one forward, but fall back to ANY remaining
-  // votable story so we never strand the user with votable work but no active
-  // story. Returns null only when nothing is left to vote on.
-  const nextVotableAfter = (stories: Story[], idx: number): string | null =>
-    stories.find((s, i) => i > idx && s.enabled && s.average === null)?.id ??
-    stories.find((s) => s.enabled && s.average === null)?.id ??
-    null;
-
   const removeStory = useCallback((id: string) => {
-    updateState((prev) => {
-      const idx = prev.stories.findIndex((s) => s.id === id);
-      const stories = prev.stories.filter((s) => s.id !== id);
-      const activeStoryId =
-        prev.activeStoryId === id ? nextVotableAfter(stories, idx - 1) : prev.activeStoryId;
-      return { ...prev, stories, activeStoryId };
-    });
+    updateState((prev) => game.removeStory(prev, id));
   }, [updateState]);
 
   const toggleStory = useCallback((id: string) => {
-    updateState((prev) => {
-      const stories = prev.stories.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
-      const toggled = stories.find((s) => s.id === id);
-      let activeStoryId = prev.activeStoryId;
-
-      if (prev.activeStoryId === id && toggled && !toggled.enabled) {
-        // Disabled the active story — hand off to the next votable one.
-        activeStoryId = nextVotableAfter(stories, stories.findIndex((s) => s.id === id));
-      } else if (
-        activeStoryId === null &&
-        toggled &&
-        toggled.enabled &&
-        toggled.average === null &&
-        prev.phase === 'voting'
-      ) {
-        // Re-enabled while nothing is active — adopt this one so voting can resume.
-        activeStoryId = id;
-      }
-
-      return { ...prev, stories, activeStoryId };
-    });
+    updateState((prev) => game.toggleStory(prev, id));
   }, [updateState]);
 
   const renameStory = useCallback((id: string, label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
-    updateState((prev) => ({
-      ...prev,
-      stories: prev.stories.map((s) => (s.id === id ? { ...s, label: trimmed } : s)),
-    }));
+    updateState((prev) => game.renameStory(prev, id, trimmed));
   }, [updateState]);
 
   const nextStory = useCallback(() => {
-    updateState((prev) => {
-      // Only record an average if we were actually voting on something.
-      let stories = prev.stories;
-      if (prev.activeStoryId !== null) {
-        const numericVotes = prev.players
-          .filter((p) => p.connected && p.vote !== null && p.vote !== '?')
-          .map((p) => p.vote as number);
-        const average =
-          numericVotes.length > 0
-            ? Math.round((numericVotes.reduce((a, b) => a + b, 0) / numericVotes.length) * 10) / 10
-            : null;
-        stories = prev.stories.map((s) =>
-          s.id === prev.activeStoryId ? { ...s, average } : s,
-        );
-      }
-
-      const currentIdx = stories.findIndex((s) => s.id === prev.activeStoryId);
-      const next = stories.find((s, i) => i > currentIdx && s.enabled && s.average === null);
-
-      if (!next) {
-        return {
-          ...prev,
-          stories,
-          activeStoryId: null,
-          phase: 'summary' as GamePhase,
-          players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
-        };
-      }
-
-      return {
-        ...prev,
-        stories,
-        activeStoryId: next.id,
-        revealed: false,
-        round: 1,
-        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
-      };
-    });
+    updateState((prev) => game.nextStory(prev));
   }, [updateState]);
 
   const newSprint = useCallback(() => {
-    updateState((prev) => {
-      const stories = prev.stories.map((s) => ({ ...s, average: null }));
-      const firstVotable = stories.find((s) => s.enabled);
-      return {
-        ...prev,
-        stories,
-        activeStoryId: firstVotable?.id ?? null,
-        phase: 'voting' as GamePhase,
-        revealed: false,
-        round: 1,
-        players: prev.players.filter((p) => p.connected).map((p) => ({ ...p, vote: null, active: false })),
-      };
-    });
+    updateState((prev) => game.newSprint(prev));
   }, [updateState]);
 
   return {

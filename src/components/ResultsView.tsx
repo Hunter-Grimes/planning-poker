@@ -1,32 +1,18 @@
 import { useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { GameState } from '../types';
+import { computeAverage, detectConsensus } from '../gameLogic';
 
 interface Props {
   gameState: GameState;
 }
 
 export function ResultsView({ gameState }: Props) {
-  const votes = gameState.players
-    .filter((p) => p.vote !== null && p.vote !== '?' && p.connected)
-    .map((p) => Number(p.vote));
+  const hasAnyVote = gameState.players.some((p) => p.vote !== null && p.connected);
+  if (!hasAnyVote) return null;
 
-  const allVotes = gameState.players
-    .filter((p) => p.vote !== null && p.connected)
-    .map((p) => p.vote!);
-
-  if (allVotes.length === 0) return null;
-
-  const avg = votes.length > 0 ? votes.reduce((a, b) => a + b, 0) / votes.length : null;
-
-  // Find the most common vote
-  const freq = allVotes.reduce<Record<string, number>>((acc, v) => {
-    const k = String(v);
-    acc[k] = (acc[k] ?? 0) + 1;
-    return acc;
-  }, {});
-  const maxFreq = Math.max(...Object.values(freq));
-  const consensus = maxFreq === allVotes.length;
+  const avg = computeAverage(gameState.players);
+  const consensus = detectConsensus(gameState.players);
 
   // Fire confetti once per reveal of a given (round, story) — otherwise
   // re-renders after a late vote arrives can re-trigger it.
