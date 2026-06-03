@@ -31,9 +31,9 @@ function debugLevel(): 0 | 1 | 2 | 3 {
 }
 
 // Optional manually-configured TURN relay (e.g. a static provider), supplied at
-// build time. Coexists with the Worker path — both are merged into the ICE list
-// if present. Comma-separated VITE_TURN_URL lets one credential advertise
-// several transports (udp/tcp/tls).
+// build time. Coexists with the VITE_ICE_ENDPOINT fetch — both are merged into
+// the ICE list if present. Comma-separated VITE_TURN_URL lets one credential
+// advertise several transports (udp/tcp/tls).
 function staticTurnServers(): RTCIceServer[] {
   const urls = import.meta.env.VITE_TURN_URL;
   if (!urls) return [];
@@ -47,8 +47,17 @@ function staticTurnServers(): RTCIceServer[] {
 }
 
 // The ICE list currently in effect. Starts STUN-only (+ any static env TURN) and
-// is upgraded in place once initPeerConfig() resolves the Worker's credentials.
+// is upgraded in place once initPeerConfig() folds in the fetched ICE servers.
 let currentIceServers: RTCIceServer[] = [...STUN_SERVERS, ...staticTurnServers()];
+
+// An RTCIceServer is only usable if it has a non-empty `urls` (string or array).
+// RTCPeerConnection throws on entries without it, so we filter the fetched list
+// before it can reach `new Peer(...)`.
+function hasUsableUrls(server: RTCIceServer): boolean {
+  const urls = server?.urls;
+  if (typeof urls === 'string') return urls.length > 0;
+  return Array.isArray(urls) && urls.length > 0;
+}
 
 // Synchronous accessor used by the peer hooks at Peer-construction time. Returns
 // whatever ICE servers are known *now* — call initPeerConfig() before rendering
@@ -81,10 +90,16 @@ export async function initPeerConfig(): Promise<void> {
     if (!res.ok) throw new Error(`ICE endpoint returned ${res.status}`);
     const data = (await res.json()) as RTCIceServer[] | { iceServers?: RTCIceServer[] };
     const fetched = Array.isArray(data) ? data : data.iceServers;
-    if (!Array.isArray(fetched) || fetched.length === 0) {
+    if (!Array.isArray(fetched)) {
       throw new Error('ICE endpoint returned no servers');
     }
-    currentIceServers = [...STUN_SERVERS, ...staticTurnServers(), ...fetched];
+    // Drop malformed entries — an iceServer without `urls` throws inside
+    // RTCPeerConnection, which would otherwise surface at `new Peer(...)`.
+    const usable = fetched.filter(hasUsableUrls);
+    if (usable.length === 0) {
+      throw new Error('ICE endpoint returned no usable servers');
+    }
+    currentIceServers = [...STUN_SERVERS, ...staticTurnServers(), ...usable];
   } catch (e) {
     console.warn('[peerConfig] ICE fetch failed; falling back to STUN-only:', e);
   }

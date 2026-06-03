@@ -1,5 +1,6 @@
 node_modules
 dist
+coverage
 .DS_Store
 
 # Local env files (e.g. VITE_ICE_ENDPOINT with your Metered apiKey)
