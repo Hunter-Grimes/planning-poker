@@ -1,7 +1,14 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { CardValue, FIBONACCI_CARDS } from '../../domain/types';
 import { CARD_COLORS } from '../../domain/cardColors';
 import { cn } from '../../lib/cn';
+
+// How long a hover must "settle" before we signal active. On touch a single tap
+// synthesizes a mouseenter a few ms before the click, so we wait this long to
+// see whether a vote lands first — if it does, the active signal is cancelled
+// (a vote already implies the player is active). Short enough to be
+// imperceptible on a real desktop hover.
+const ACTIVATE_DELAY_MS = 150;
 
 interface Props {
   selected: CardValue | null;
@@ -11,15 +18,43 @@ interface Props {
 }
 
 export function CardDeck({ selected, onSelect, onActivate, stageKey }: Props) {
-  // Fire onActivate at most once per voting stage — and only when the mouse
-  // actually enters a card. If the cursor was already parked on a card from
-  // the previous round, no new mouseenter fires, so we don't signal.
+  // Fire onActivate at most once per voting stage, and only when a hover
+  // settles without a click landing behind it. The mouseenter schedules the
+  // signal; a vote (or unmount) cancels it. This keeps the "active" indicator
+  // for genuine desktop hovers while skipping the functionally useless signal
+  // a touch tap would otherwise emit right before its vote.
   const lastFiredKeyRef = useRef<string | null>(null);
+  const activateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingActivate = () => {
+    if (activateTimerRef.current !== null) {
+      clearTimeout(activateTimerRef.current);
+      activateTimerRef.current = null;
+    }
+  };
+
+  // Drop any pending signal if the deck unmounts mid-window.
+  useEffect(() => cancelPendingActivate, []);
+
   const handleMouseEnter = () => {
     if (!onActivate || stageKey == null) return;
     if (lastFiredKeyRef.current === stageKey) return;
-    lastFiredKeyRef.current = stageKey;
-    onActivate();
+    if (activateTimerRef.current !== null) return; // already waiting to fire
+    const key = stageKey;
+    activateTimerRef.current = setTimeout(() => {
+      activateTimerRef.current = null;
+      lastFiredKeyRef.current = key;
+      onActivate();
+    }, ACTIVATE_DELAY_MS);
+  };
+
+  const handleSelect = (card: CardValue) => {
+    // A vote implies "active" — cancel the pending hover signal so it can't
+    // fire redundantly (and race the host's throttle) right behind the vote,
+    // and mark this stage as handled so later hovers stay quiet.
+    cancelPendingActivate();
+    if (stageKey != null) lastFiredKeyRef.current = stageKey;
+    onSelect(card);
   };
 
   return (
@@ -30,7 +65,7 @@ export function CardDeck({ selected, onSelect, onActivate, stageKey }: Props) {
         return (
           <button
             key={String(card)}
-            onClick={() => onSelect(card)}
+            onClick={() => handleSelect(card)}
             onMouseEnter={handleMouseEnter}
             className={cn(
               'w-16 h-24 rounded-xl text-xl font-bold border-2 transition-all duration-150 select-none overflow-hidden',
