@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { CardValue, GameState, PeerMessage, isPeerMessage } from '../types';
-import { peerConfig } from '../peerConfig';
+import { getPeerConfig } from '../peerConfig';
 
 export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
 
@@ -27,7 +27,7 @@ export function usePeerClient(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const peer = new Peer(peerConfig);
+    const peer = new Peer(getPeerConfig());
     peerRef.current = peer;
 
     // WebRTC can stall during ICE negotiation without ever firing 'open' or

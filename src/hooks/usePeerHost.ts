@@ -13,7 +13,7 @@ import {
   MAX_COMPONENT_LABEL_LENGTH,
 } from '../types';
 import * as game from '../gameLogic';
-import { peerConfig } from '../peerConfig';
+import { getPeerConfig } from '../peerConfig';
 
 // Send a rejection message, then close shortly after so the message has time to
 // flush across the data channel before the connection tears down.
@@ -169,7 +169,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     const MAX_UNAVAILABLE_RETRIES = 3;
 
     function setupPeer(peerId: string) {
-      const peer = new Peer(peerId, peerConfig);
+      const peer = new Peer(peerId, getPeerConfig());
       peerRef.current = peer;
 
       peer.on('open', (id) => {

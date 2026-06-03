@@ -48,6 +48,11 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          # Front-end-safe Metered apiKey URL; set under
+          # Settings → Secrets and variables → Actions → Variables.
+          # Unset is fine — the app falls back to STUN-only.
+          VITE_ICE_ENDPOINT: ${{ vars.VITE_ICE_ENDPOINT }}
 
       - uses: actions/configure-pages@v5
 

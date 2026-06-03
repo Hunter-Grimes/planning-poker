@@ -63,10 +63,30 @@ WebRTC data channel. Traversing NAT needs ICE servers, configured in
 [`peerConfig.ts`](src/peerConfig.ts). The default is a STUN-only pool, which is
 enough when at least one peer is directly reachable.
 
-On restrictive networks — symmetric NAT, corporate firewalls, VPNs — STUN can't
-punch through and a guest will reach the room but never connect ("Connecting…"
-then an error). That case needs a **TURN relay**, supplied via build-time env
-vars (e.g. in a `.env` file or your CI secrets):
+On restrictive networks — symmetric NAT, corporate firewalls, VPNs, mobile data —
+STUN can't punch through and a guest will reach the room but never connect
+("Connecting…" then an error after ~15s). That case needs a **TURN relay**.
+
+### TURN via Metered (recommended)
+
+At startup the app fetches ICE servers from `VITE_ICE_ENDPOINT` (when set) and
+merges them with the STUN pool. Point it at [Metered](https://www.metered.ca/)'s
+front-end-safe credentials URL — the `apiKey` there is designed to be embedded
+in the client:
+
+```bash
+VITE_ICE_ENDPOINT=https://<your-app>.metered.live/api/v1/turn/credentials?apiKey=<your-api-key>
+```
+
+The fetch is time-boxed (~3s) and falls back to STUN-only if the endpoint is
+unreachable, so play on the same network keeps working regardless. The endpoint
+may return Metered's bare array or a `{ "iceServers": [...] }` object — both are
+accepted, so a custom credential service works too.
+
+### TURN via static credentials (alternative)
+
+If you have a fixed relay (your own [coturn](https://github.com/coturn/coturn),
+Twilio, etc.) you can hard-wire it instead of / in addition to the endpoint:
 
 ```bash
 VITE_TURN_URL=turn:turn.example.com:3478,turns:turn.example.com:5349
@@ -75,9 +95,7 @@ VITE_TURN_CREDENTIAL=your-credential
 ```
 
 `VITE_TURN_URL` is comma-separated so one credential can advertise several
-transports. Get credentials from a TURN provider (e.g. metered.ca, Twilio) or
-self-host [coturn](https://github.com/coturn/coturn). Without TURN, strict-NAT
-clients can't connect — there is no free reliable public relay to fall back on.
+transports.
 
 If a guest gets stuck connecting, it now fails with an error after ~15s instead
 of hanging. To see exactly where the handshake breaks, set `VITE_PEER_DEBUG=3`
@@ -90,5 +108,6 @@ Wi-Fi "client isolation" / guest networks), which is what TURN is for.
 The app is a static bundle. `npm run build` emits to `dist/`. It is configured
 for GitHub Pages under the `/planning-poker/` path — see the `base` option in
 [`vite.config.ts`](vite.config.ts) if you deploy elsewhere. To enable TURN in a
-GitHub Pages build, set the `VITE_TURN_*` values as repository secrets and pass
-them as env to the `npm run build` step in [`deploy.yml`](.github/workflows/deploy.yml).
+GitHub Pages build, set `VITE_ICE_ENDPOINT` (a repository **variable** is fine —
+Metered's `apiKey` is front-end-safe) and pass it as env to the `npm run build`
+step in [`deploy.yml`](.github/workflows/deploy.yml).
