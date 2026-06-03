@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { CardValue, GameState, PeerMessage } from '../domain/types';
 import { isPeerMessage } from '../domain/validation';
+import { applyDelta } from '../domain/gameLogic';
 import { getPeerConfig } from '../lib/peerConfig';
 
 export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
@@ -23,9 +24,16 @@ export function usePeerClient(
   const connRef = useRef<DataConnection | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
+  // Mirror of myId for use inside stable callbacks (optimistic own-vote write).
+  const myIdRef = useRef<string | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [error, setError] = useState<string | null>(null);
+  // Last applied state version, and whether we've received an initial snapshot.
+  // Deltas only apply when in lockstep (version === last + 1); any gap triggers
+  // a resync request and the delta is dropped until a fresh snapshot arrives.
+  const versionRef = useRef(0);
+  const syncedRef = useRef(false);
 
   useEffect(() => {
     const peer = new Peer(getPeerConfig());
@@ -47,6 +55,7 @@ export function usePeerClient(
 
     peer.on('open', (id) => {
       setMyId(id);
+      myIdRef.current = id;
       const conn = peer.connect(roomId, { reliable: true });
       connRef.current = conn;
 
@@ -80,11 +89,38 @@ export function usePeerClient(
         // direct connects are rejected below, but defense-in-depth here too.
         if (conn !== connRef.current) return;
         if (!isPeerMessage(raw)) return;
-        if (raw.type === 'state') setGameState(raw.state);
-        if (raw.type === 'approved') setStatus('connected');
-        if (raw.type === 'rejected') {
-          setError(raw.reason);
-          setStatus('error');
+
+        switch (raw.type) {
+          case 'approved':
+            setStatus('connected');
+            return;
+          case 'rejected':
+            setError(raw.reason);
+            setStatus('error');
+            return;
+          case 'snapshot':
+            versionRef.current = raw.version;
+            syncedRef.current = true;
+            setGameState(raw.state);
+            return;
+          // Everything else is a versioned state delta.
+          case 'voted':
+          case 'unvoted':
+          case 'player-active':
+          case 'reveal':
+          case 'player-joined':
+          case 'player-disconnected':
+          case 'player-removed': {
+            // Must have a base state and be exactly one version ahead. Any gap
+            // (lost message, pre-snapshot delta) means we re-sync from scratch.
+            if (!syncedRef.current || raw.version !== versionRef.current + 1) {
+              if (conn.open) conn.send({ type: 'request-resync' } satisfies PeerMessage);
+              return;
+            }
+            versionRef.current = raw.version;
+            setGameState((prev) => (prev ? applyDelta(prev, raw) : prev));
+            return;
+          }
         }
       });
 
@@ -138,6 +174,23 @@ export function usePeerClient(
     if (connRef.current?.open) {
       const msg: PeerMessage = { type: 'vote', value };
       connRef.current.send(msg);
+      // Optimistically reflect our own vote locally. The host echoes a `voted`
+      // delta (which carries no value, to keep it secret), so without this our
+      // own card wouldn't show as selected until reveal. `myVote` is derived
+      // from gameState, and a new-round snapshot clears it again.
+      const myId = myIdRef.current;
+      if (myId) {
+        setGameState((prev) =>
+          prev
+            ? {
+                ...prev,
+                players: prev.players.map((p) =>
+                  p.id === myId ? { ...p, vote: value, hasVoted: true } : p,
+                ),
+              }
+            : prev,
+        );
+      }
     }
   }, []);
 

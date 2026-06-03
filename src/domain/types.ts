@@ -53,12 +53,42 @@ export interface PendingEntry {
   persistentId: string;
 }
 
+// State deltas without their version stamp — the host builds these, then
+// `emitDelta` adds the monotonic `version` before sending. `applyDelta` on the
+// client consumes the stamped form (`StateDelta`).
+export type StateDeltaBody =
+  // A player cast (or changed) a vote — value stays hidden until reveal, so we
+  // only flip their `hasVoted` flag. The voter shows their own value locally.
+  | { type: 'voted'; id: string }
+  // The host cleared a player's vote (guests can't clear; they re-vote).
+  | { type: 'unvoted'; id: string }
+  // A player started engaging with the deck this stage ("thinking" dot).
+  | { type: 'player-active'; id: string }
+  // Reveal: carries every connected voter's actual value so clients can show
+  // results and compute the average/consensus.
+  | { type: 'reveal'; votes: [string, CardValue][] }
+  // A newly-approved player joined (sent to everyone *except* the joiner, who
+  // gets a full snapshot instead).
+  | { type: 'player-joined'; player: Player }
+  // A player's connection dropped — they stay in the list, greyed out.
+  | { type: 'player-disconnected'; id: string }
+  // A player was kicked — removed from the list entirely.
+  | { type: 'player-removed'; id: string };
+
+export type StateDelta = StateDeltaBody & { version: number };
+
 export type PeerMessage =
+  // --- client → host -------------------------------------------------------
   | { type: 'request-join'; name: string; persistentId: string }
-  | { type: 'approved' }
-  | { type: 'rejected'; reason: string }
   | { type: 'vote'; value: CardValue }
   | { type: 'active' }
-  | { type: 'reveal' }
-  | { type: 'new-round' }
-  | { type: 'state'; state: GameState };
+  // Sent when the client detects a version gap; host replies with a snapshot.
+  | { type: 'request-resync' }
+  // --- host → client (unversioned control) ---------------------------------
+  | { type: 'approved' }
+  | { type: 'rejected'; reason: string }
+  // --- host → client (versioned state sync) --------------------------------
+  // Full state — sent on join, on resync, and on structural transitions
+  // (round/phase/component changes) where a delta would be fragile.
+  | { type: 'snapshot'; version: number; state: GameState }
+  | StateDelta;

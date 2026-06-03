@@ -50,11 +50,54 @@ describe('usePeerClient', () => {
     expect(result.current.error).toBe('Room is full');
   });
 
-  it('adopts state broadcasts from the host', () => {
+  it('adopts snapshots from the host', () => {
     const { result, conn } = connectClient();
     const state = makeGameState({ players: [makePlayer({ name: 'Host' })], round: 3 });
-    act(() => conn.receive({ type: 'state', state } satisfies PeerMessage));
+    act(() => conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage));
     expect(result.current.gameState).toEqual(state);
+  });
+
+  it('applies an in-order delta on top of a snapshot', () => {
+    const { result, conn } = connectClient();
+    const host = makePlayer({ id: 'HOST', name: 'Host' });
+    const state = makeGameState({ players: [host] });
+    act(() => conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage));
+
+    act(() => conn.receive({ type: 'voted', version: 2, id: 'HOST' } satisfies PeerMessage));
+    expect(result.current.gameState?.players.find((p) => p.id === 'HOST')?.hasVoted).toBe(true);
+
+    act(() => conn.receive({ type: 'reveal', version: 3, votes: [['HOST', 5]] } satisfies PeerMessage));
+    expect(result.current.gameState?.revealed).toBe(true);
+    expect(result.current.gameState?.players.find((p) => p.id === 'HOST')?.vote).toBe(5);
+  });
+
+  it('requests a resync when a delta arrives out of order', () => {
+    const { conn } = connectClient();
+    const state = makeGameState({ players: [makePlayer({ id: 'HOST', name: 'Host' })] });
+    act(() => conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage));
+
+    // Skip version 2 — a v3 delta must not be applied; client asks to resync.
+    act(() => conn.receive({ type: 'voted', version: 3, id: 'HOST' } satisfies PeerMessage));
+    expect(conn.sent).toContainEqual({ type: 'request-resync' } satisfies PeerMessage);
+  });
+
+  it('requests a resync if a delta arrives before any snapshot', () => {
+    const { conn } = connectClient();
+    act(() => conn.receive({ type: 'voted', version: 1, id: 'HOST' } satisfies PeerMessage));
+    expect(conn.sent).toContainEqual({ type: 'request-resync' } satisfies PeerMessage);
+  });
+
+  it('optimistically reflects the local vote before the host echoes it', () => {
+    const { result, conn } = connectClient();
+    act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+    const me = makePlayer({ id: 'CLIENT01', name: 'Guest' });
+    const state = makeGameState({ players: [me] });
+    act(() => conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage));
+
+    act(() => result.current.vote(8));
+    const mine = result.current.gameState?.players.find((p) => p.id === 'CLIENT01');
+    expect(mine?.vote).toBe(8);
+    expect(mine?.hasVoted).toBe(true);
   });
 
   it('sends a vote only while the connection is open', () => {

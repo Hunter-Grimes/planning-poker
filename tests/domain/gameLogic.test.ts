@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   addComponent,
+  applyDelta,
+  buildRevealVotes,
   castVote,
   computeAverage,
   detectConsensus,
@@ -176,38 +178,19 @@ describe('reveal', () => {
   });
 });
 
-describe('newRound', () => {
-  it('clears votes and active flags', () => {
-    const state = makeGameState({
-      revealed: true,
-      players: [voter('a', 5, { active: true })],
-    });
-    const next = newRound(state);
-    expect(next.revealed).toBe(false);
-    expect(next.players[0].vote).toBeNull();
-    expect(next.players[0].active).toBe(false);
-  });
-
-  it('drops players who are still disconnected', () => {
-    const state = makeGameState({
-      players: [voter('a', 5), makePlayer({ name: 'b', connected: false })],
-    });
-    expect(newRound(state).players.map((p) => p.name)).toEqual(['a']);
-  });
-
-  it('increments the round counter', () => {
-    expect(newRound(makeGameState({ round: 1 })).round).toBe(2);
-    expect(newRound(makeGameState({ round: 4 })).round).toBe(5);
-  });
-});
-
-describe('restartRound', () => {
+// newRound and restartRound share the same reset behavior — clear votes/active
+// flags, hide results, drop still-disconnected players. They differ only in the
+// round counter: newRound advances it, restartRound holds it in place.
+describe.each([
+  ['newRound', newRound, (r: number) => r + 1],
+  ['restartRound', restartRound, (r: number) => r],
+] as const)('%s', (_name, run, nextRound) => {
   it('clears votes and active flags and hides results', () => {
     const state = makeGameState({
       revealed: true,
       players: [voter('a', 5, { active: true })],
     });
-    const next = restartRound(state);
+    const next = run(state);
     expect(next.revealed).toBe(false);
     expect(next.players[0].vote).toBeNull();
     expect(next.players[0].active).toBe(false);
@@ -217,12 +200,12 @@ describe('restartRound', () => {
     const state = makeGameState({
       players: [voter('a', 5), makePlayer({ name: 'b', connected: false })],
     });
-    expect(restartRound(state).players.map((p) => p.name)).toEqual(['a']);
+    expect(run(state).players.map((p) => p.name)).toEqual(['a']);
   });
 
-  it('does NOT increment the round counter', () => {
-    expect(restartRound(makeGameState({ round: 1 })).round).toBe(1);
-    expect(restartRound(makeGameState({ round: 4 })).round).toBe(4);
+  it('sets the round counter according to its policy', () => {
+    expect(run(makeGameState({ round: 1 })).round).toBe(nextRound(1));
+    expect(run(makeGameState({ round: 4 })).round).toBe(nextRound(4));
   });
 });
 
@@ -388,5 +371,101 @@ describe('castVote / setActive', () => {
     const next = setActive(state, 'p2');
     expect(next.players.find((p) => p.id === 'p2')!.active).toBe(true);
     expect(next.players.find((p) => p.id === 'p1')!.active).toBeUndefined();
+  });
+});
+
+describe('buildRevealVotes', () => {
+  it('emits [id, value] pairs for connected players who voted', () => {
+    const players = [
+      voter('a', 5, { id: 'a' }),
+      voter('b', '?', { id: 'b' }),
+      makePlayer({ id: 'c', vote: null }),
+      voter('d', 8, { id: 'd', connected: false }),
+    ];
+    expect(buildRevealVotes(players)).toEqual([
+      ['a', 5],
+      ['b', '?'],
+    ]);
+  });
+});
+
+describe('applyDelta', () => {
+  const base = () =>
+    makeGameState({
+      players: [
+        makePlayer({ id: 'a', name: 'Alice', vote: null }),
+        makePlayer({ id: 'b', name: 'Bob', vote: null }),
+      ],
+    });
+
+  it('voted flips hasVoted without exposing a value', () => {
+    const next = applyDelta(base(), { type: 'voted', version: 1, id: 'a' });
+    const a = next.players.find((p) => p.id === 'a')!;
+    expect(a.hasVoted).toBe(true);
+    expect(a.vote).toBeNull();
+  });
+
+  it('voted preserves an existing (own optimistic) value', () => {
+    const start = makeGameState({ players: [makePlayer({ id: 'a', vote: 5 })] });
+    const next = applyDelta(start, { type: 'voted', version: 1, id: 'a' });
+    expect(next.players.find((p) => p.id === 'a')!.vote).toBe(5);
+  });
+
+  it('unvoted clears the value and the flag', () => {
+    const start = makeGameState({ players: [makePlayer({ id: 'a', vote: 5, hasVoted: true })] });
+    const next = applyDelta(start, { type: 'unvoted', version: 1, id: 'a' });
+    const a = next.players.find((p) => p.id === 'a')!;
+    expect(a.vote).toBeNull();
+    expect(a.hasVoted).toBe(false);
+  });
+
+  it('player-active sets the active flag', () => {
+    const next = applyDelta(base(), { type: 'player-active', version: 1, id: 'b' });
+    expect(next.players.find((p) => p.id === 'b')!.active).toBe(true);
+  });
+
+  it('reveal fills in votes and marks the state revealed', () => {
+    const next = applyDelta(base(), {
+      type: 'reveal',
+      version: 1,
+      votes: [
+        ['a', 5],
+        ['b', '?'],
+      ],
+    });
+    expect(next.revealed).toBe(true);
+    expect(next.players.find((p) => p.id === 'a')!.vote).toBe(5);
+    expect(next.players.find((p) => p.id === 'b')!.vote).toBe('?');
+  });
+
+  it('reveal clears the vote of a player who never voted', () => {
+    const start = makeGameState({ players: [makePlayer({ id: 'a', vote: 5, hasVoted: true })] });
+    const next = applyDelta(start, { type: 'reveal', version: 1, votes: [] });
+    const a = next.players.find((p) => p.id === 'a')!;
+    expect(a.vote).toBeNull();
+    expect(a.hasVoted).toBe(false);
+  });
+
+  it('player-joined appends a new player', () => {
+    const joined = makePlayer({ id: 'c', name: 'Carol' });
+    const next = applyDelta(base(), { type: 'player-joined', version: 1, player: joined });
+    expect(next.players.map((p) => p.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('player-joined replaces an existing entry for the same id', () => {
+    const rejoined = makePlayer({ id: 'a', name: 'Alice2' });
+    const next = applyDelta(base(), { type: 'player-joined', version: 1, player: rejoined });
+    expect(next.players.filter((p) => p.id === 'a')).toHaveLength(1);
+    expect(next.players.find((p) => p.id === 'a')!.name).toBe('Alice2');
+  });
+
+  it('player-disconnected greys a player out but keeps them', () => {
+    const next = applyDelta(base(), { type: 'player-disconnected', version: 1, id: 'a' });
+    expect(next.players.find((p) => p.id === 'a')!.connected).toBe(false);
+  });
+
+  it('player-removed drops the player entirely', () => {
+    const next = applyDelta(base(), { type: 'player-removed', version: 1, id: 'a' });
+    expect(next.players.map((p) => p.id)).toEqual(['b']);
   });
 });

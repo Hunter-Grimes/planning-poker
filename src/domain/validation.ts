@@ -56,10 +56,29 @@ export function isCardValue(v: unknown): v is CardValue {
   return (FIBONACCI_CARDS as readonly unknown[]).includes(v);
 }
 
+function isVersion(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+// Reveal payload: an array of [peerId, CardValue] pairs.
+function isRevealVotes(v: unknown): v is [string, CardValue][] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) => Array.isArray(e) && e.length === 2 && typeof e[0] === 'string' && isCardValue(e[1]),
+    )
+  );
+}
+
 export function isPeerMessage(raw: unknown): raw is PeerMessage {
   if (typeof raw !== 'object' || raw === null) return false;
   const msg = raw as Record<string, unknown>;
   switch (msg.type) {
+    // --- client → host -----------------------------------------------------
     case 'request-join':
       return (
         typeof msg.name === 'string' &&
@@ -68,18 +87,29 @@ export function isPeerMessage(raw: unknown): raw is PeerMessage {
         typeof msg.persistentId === 'string' &&
         msg.persistentId.length > 0
       );
+    case 'vote':
+      return isCardValue(msg.value);
+    case 'active':
+    case 'request-resync':
+      return true;
+    // --- host → client (unversioned control) -------------------------------
     case 'approved':
       return true;
     case 'rejected':
       return typeof msg.reason === 'string';
-    case 'vote':
-      return isCardValue(msg.value);
-    case 'active':
+    // --- host → client (versioned state sync) ------------------------------
+    case 'snapshot':
+      return isVersion(msg.version) && isGameState(msg.state);
+    case 'voted':
+    case 'unvoted':
+    case 'player-active':
+    case 'player-disconnected':
+    case 'player-removed':
+      return isVersion(msg.version) && isNonEmptyString(msg.id);
+    case 'player-joined':
+      return isVersion(msg.version) && isPlayer(msg.player);
     case 'reveal':
-    case 'new-round':
-      return true;
-    case 'state':
-      return isGameState(msg.state);
+      return isVersion(msg.version) && isRevealVotes(msg.votes);
     default:
       return false;
   }

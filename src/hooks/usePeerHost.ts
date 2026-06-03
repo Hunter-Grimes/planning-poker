@@ -4,6 +4,7 @@ import {
   CardValue,
   GameState,
   PeerMessage,
+  StateDeltaBody,
   PendingEntry,
   Player,
   Component,
@@ -21,6 +22,12 @@ function rejectAndClose(conn: DataConnection, reason: string): void {
   if (!conn.open) return;
   conn.send({ type: 'rejected', reason } satisfies PeerMessage);
   setTimeout(() => conn.close(), 200);
+}
+
+// Build the full-state message for one recipient at a given version. Used on
+// join, on resync, and on structural transitions.
+function snapshotMessage(state: GameState, peerId: string, version: number): PeerMessage {
+  return { type: 'snapshot', version, state: game.redactForClient(state, peerId) };
 }
 
 export interface UsePeerHostOptions {
@@ -97,25 +104,54 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
 
-  const broadcast = useCallback((state: GameState) => {
-    connectionsRef.current.forEach((conn, peerId) => {
-      if (conn.open) {
-        const redacted = game.redactForClient(state, peerId);
-        conn.send({ type: 'state', state: redacted } satisfies PeerMessage);
-      }
-    });
+  // Monotonic state version. Every host→client sync message (snapshot or delta)
+  // carries the version it produces; clients use it to detect a missed update
+  // and request a resync. Persisted in a ref so it survives re-renders.
+  const versionRef = useRef(0);
+
+  // Commit a new state locally and bump the version. Returns the new version so
+  // the caller can stamp the outgoing message(s). No sends here — the caller
+  // decides between a delta (cheap) and a full snapshot (structural changes).
+  const commit = useCallback((next: GameState): number => {
+    gameStateRef.current = next;
+    setGameState(next);
+    versionRef.current += 1;
+    return versionRef.current;
   }, []);
 
-  // Compute next state, commit it to the ref immediately, then hand it to
-  // React and broadcast — no side effects inside the setState updater.
-  const updateState = useCallback(
+  // Compute next state, commit it, and broadcast a full per-recipient snapshot.
+  // Use for structural transitions (round/phase/component changes) where a
+  // targeted delta would be fragile.
+  const updateStateSnapshot = useCallback(
     (updater: (prev: GameState) => GameState) => {
       const next = updater(gameStateRef.current);
-      gameStateRef.current = next;
-      setGameState(next);
-      broadcast(next);
+      const version = commit(next);
+      connectionsRef.current.forEach((conn, peerId) => {
+        if (conn.open) conn.send(snapshotMessage(next, peerId, version));
+      });
     },
-    [broadcast],
+    [commit],
+  );
+
+  // Compute next state, commit it, then broadcast a small delta describing what
+  // changed. `makeDelta` is given the committed state so it can derive payloads
+  // (e.g. reveal votes). `exceptPeerId` skips one connection (e.g. the joiner,
+  // who receives a full snapshot instead).
+  const emitDelta = useCallback(
+    (
+      updater: (prev: GameState) => GameState,
+      makeDelta: (next: GameState) => StateDeltaBody,
+      exceptPeerId?: string,
+    ) => {
+      const next = updater(gameStateRef.current);
+      const version = commit(next);
+      const msg = { ...makeDelta(next), version } as PeerMessage;
+      connectionsRef.current.forEach((conn, peerId) => {
+        if (peerId === exceptPeerId) return;
+        if (conn.open) conn.send(msg);
+      });
+    },
+    [commit],
   );
 
   // Shared approval logic — callable from both auto-approve and manual approve paths
@@ -140,20 +176,29 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         conn.send({ type: 'approved' });
       }
 
-      // Add/refresh the player and broadcast — broadcast now hits the new
-      // conn too since we just added it to connectionsRef.
-      updateState((prev) => {
-        const newPlayer: Player = { id: peerId, name, vote: null, connected: true };
-        return {
-          ...prev,
-          players: [...prev.players.filter((p) => p.id !== peerId), newPlayer],
-        };
+      // Add/refresh the player. The joiner gets a full snapshot (it has no
+      // base state yet); everyone else gets a cheap player-joined delta.
+      const newPlayer: Player = { id: peerId, name, vote: null, connected: true };
+      const next: GameState = {
+        ...gameStateRef.current,
+        players: [...gameStateRef.current.players.filter((p) => p.id !== peerId), newPlayer],
+      };
+      const version = commit(next);
+      if (conn.open) conn.send(snapshotMessage(next, peerId, version));
+      const joinedMsg: PeerMessage = {
+        type: 'player-joined',
+        version,
+        player: { ...newPlayer, hasVoted: false },
+      };
+      connectionsRef.current.forEach((other, otherId) => {
+        if (otherId === peerId) return;
+        if (other.open) other.send(joinedMsg);
       });
 
       approvedIdsRef.current!.add(persistentId);
       optionsRef.current.onApprove?.(persistentId, name);
     },
-    [updateState],
+    [commit],
   );
 
   // Keep doApprove stable via ref so data-handler closures stay current
@@ -297,7 +342,10 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             // Only the currently-approved connection for this peer may vote.
             // Stale/replaced/pending connections can't trigger broadcasts.
             if (connectionsRef.current.get(conn.peer) !== conn) return;
-            updateState((prev) => game.castVote(prev, conn.peer, raw.value));
+            emitDelta(
+              (prev) => game.castVote(prev, conn.peer, raw.value),
+              () => ({ type: 'voted', id: conn.peer }),
+            );
           }
 
           if (raw.type === 'active') {
@@ -306,7 +354,19 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
             if (connectionsRef.current.get(conn.peer) !== conn) return;
             const existing = gameStateRef.current.players.find((p) => p.id === conn.peer);
             if (!existing || existing.active) return;
-            updateState((prev) => game.setActive(prev, conn.peer));
+            emitDelta(
+              (prev) => game.setActive(prev, conn.peer),
+              () => ({ type: 'player-active', id: conn.peer }),
+            );
+          }
+
+          if (raw.type === 'request-resync') {
+            // Client missed an update — re-send the current full state to it
+            // alone, at the current version (no bump; nothing changed).
+            if (connectionsRef.current.get(conn.peer) !== conn) return;
+            if (conn.open) {
+              conn.send(snapshotMessage(gameStateRef.current, conn.peer, versionRef.current));
+            }
           }
         });
 
@@ -323,10 +383,15 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
           if (connectionsRef.current.get(conn.peer) !== conn) return;
           connectionsRef.current.delete(conn.peer);
           peerToPersistentIdRef.current.delete(conn.peer);
-          updateState((prev) => ({
-            ...prev,
-            players: prev.players.map((p) => (p.id === conn.peer ? { ...p, connected: false } : p)),
-          }));
+          emitDelta(
+            (prev) => ({
+              ...prev,
+              players: prev.players.map((p) =>
+                p.id === conn.peer ? { ...p, connected: false } : p,
+              ),
+            }),
+            () => ({ type: 'player-disconnected', id: conn.peer }),
+          );
         });
       });
     }
@@ -337,8 +402,8 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       peerRef.current?.destroy();
     };
     // hostName and options are read via refs so renaming / prop changes don't
-    // tear down the peer and room — updateState is the only real dependency.
-  }, [updateState]);
+    // tear down the peer and room — emitDelta is the only real dependency.
+  }, [emitDelta]);
 
   const approvePlayer = useCallback(
     (peerId: string) => {
@@ -371,10 +436,15 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       connectionsRef.current.delete(peerId);
       peerToPersistentIdRef.current.delete(peerId);
 
-      updateState((prev) => ({
-        ...prev,
-        players: prev.players.filter((p) => p.id !== peerId),
-      }));
+      // The kicked conn is already out of connectionsRef, so this delta only
+      // reaches the remaining players.
+      emitDelta(
+        (prev) => ({
+          ...prev,
+          players: prev.players.filter((p) => p.id !== peerId),
+        }),
+        () => ({ type: 'player-removed', id: peerId }),
+      );
 
       if (conn) rejectAndClose(conn, 'You were removed by the host');
 
@@ -383,7 +453,7 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
         optionsRef.current.onKick?.(persistentId);
       }
     },
-    [updateState],
+    [emitDelta],
   );
 
   const castHostVote = useCallback(
@@ -391,9 +461,12 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
       const hostId = peerRef.current?.id;
       if (!hostId) return;
       if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
-      updateState((prev) => game.castVote(prev, hostId, value));
+      emitDelta(
+        (prev) => game.castVote(prev, hostId, value),
+        () => (value === null ? { type: 'unvoted', id: hostId } : { type: 'voted', id: hostId }),
+      );
     },
-    [updateState],
+    [emitDelta],
   );
 
   const castHostActive = useCallback(() => {
@@ -402,61 +475,67 @@ export function usePeerHost(hostName: string, options: UsePeerHostOptions = {}):
     if (gameStateRef.current.revealed || gameStateRef.current.phase !== 'voting') return;
     const me = gameStateRef.current.players.find((p) => p.id === hostId);
     if (!me || me.active) return;
-    updateState((prev) => game.setActive(prev, hostId));
-  }, [updateState]);
+    emitDelta(
+      (prev) => game.setActive(prev, hostId),
+      () => ({ type: 'player-active', id: hostId }),
+    );
+  }, [emitDelta]);
 
   const reveal = useCallback(() => {
-    updateState((prev) => game.reveal(prev));
-  }, [updateState]);
+    emitDelta(
+      (prev) => game.reveal(prev),
+      (next) => ({ type: 'reveal', votes: game.buildRevealVotes(next.players) }),
+    );
+  }, [emitDelta]);
 
   const newRound = useCallback(() => {
-    updateState((prev) => game.newRound(prev));
-  }, [updateState]);
+    updateStateSnapshot((prev) => game.newRound(prev));
+  }, [updateStateSnapshot]);
 
   const restartRound = useCallback(() => {
-    updateState((prev) => game.restartRound(prev));
-  }, [updateState]);
+    updateStateSnapshot((prev) => game.restartRound(prev));
+  }, [updateStateSnapshot]);
 
   const addComponent = useCallback(
     (label: string) => {
       const trimmed = label.trim().slice(0, MAX_COMPONENT_LABEL_LENGTH);
       if (!trimmed) return;
       const component: Component = { id: randomId(), label: trimmed, enabled: true, average: null };
-      updateState((prev) => game.addComponent(prev, component));
+      updateStateSnapshot((prev) => game.addComponent(prev, component));
     },
-    [updateState],
+    [updateStateSnapshot],
   );
 
   const removeComponent = useCallback(
     (id: string) => {
-      updateState((prev) => game.removeComponent(prev, id));
+      updateStateSnapshot((prev) => game.removeComponent(prev, id));
     },
-    [updateState],
+    [updateStateSnapshot],
   );
 
   const toggleComponent = useCallback(
     (id: string) => {
-      updateState((prev) => game.toggleComponent(prev, id));
+      updateStateSnapshot((prev) => game.toggleComponent(prev, id));
     },
-    [updateState],
+    [updateStateSnapshot],
   );
 
   const renameComponent = useCallback(
     (id: string, label: string) => {
       const trimmed = label.trim().slice(0, MAX_COMPONENT_LABEL_LENGTH);
       if (!trimmed) return;
-      updateState((prev) => game.renameComponent(prev, id, trimmed));
+      updateStateSnapshot((prev) => game.renameComponent(prev, id, trimmed));
     },
-    [updateState],
+    [updateStateSnapshot],
   );
 
   const nextComponent = useCallback(() => {
-    updateState((prev) => game.nextComponent(prev));
-  }, [updateState]);
+    updateStateSnapshot((prev) => game.nextComponent(prev));
+  }, [updateStateSnapshot]);
 
   const newTicket = useCallback(() => {
-    updateState((prev) => game.newTicket(prev));
-  }, [updateState]);
+    updateStateSnapshot((prev) => game.newTicket(prev));
+  }, [updateStateSnapshot]);
 
   return {
     roomId,

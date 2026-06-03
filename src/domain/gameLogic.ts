@@ -1,4 +1,4 @@
-import { CardValue, GamePhase, GameState, Player, Component } from './types';
+import { CardValue, GamePhase, GameState, Player, Component, StateDelta } from './types';
 
 // Signaling goes through broker.peerjs.com. Codes avoid easily-confused glyphs
 // (no 0/O/1/I) so they're easy to read aloud.
@@ -24,6 +24,68 @@ export function redactForClient(state: GameState, recipientPeerId: string): Game
       };
     }),
   };
+}
+
+// The wire payload for a reveal: every connected player who actually voted,
+// as [peerId, value] pairs (includes '?'). Mirrors the redaction contract —
+// only at reveal do real values leave the host.
+export function buildRevealVotes(players: Player[]): [string, CardValue][] {
+  return players
+    .filter((p) => p.connected && p.vote !== null)
+    .map((p) => [p.id, p.vote as CardValue]);
+}
+
+// Apply a host state delta to the client's local game state. Pure — mirrors the
+// host's authoritative reducers but only touches the fields the delta carries,
+// so unchanged data (player names, components) never has to be re-sent.
+export function applyDelta(state: GameState, delta: StateDelta): GameState {
+  switch (delta.type) {
+    case 'voted':
+      // Flip hasVoted only — the value stays hidden. We deliberately leave
+      // `vote` untouched so the recipient's own optimistic value survives.
+      return {
+        ...state,
+        players: state.players.map((p) => (p.id === delta.id ? { ...p, hasVoted: true } : p)),
+      };
+    case 'unvoted':
+      return {
+        ...state,
+        players: state.players.map((p) =>
+          p.id === delta.id ? { ...p, vote: null, hasVoted: false } : p,
+        ),
+      };
+    case 'player-active':
+      return {
+        ...state,
+        players: state.players.map((p) => (p.id === delta.id ? { ...p, active: true } : p)),
+      };
+    case 'reveal': {
+      const votes = new Map<string, CardValue>(delta.votes);
+      return {
+        ...state,
+        revealed: true,
+        players: state.players.map((p) =>
+          votes.has(p.id)
+            ? { ...p, vote: votes.get(p.id)!, hasVoted: true }
+            : { ...p, vote: null, hasVoted: false },
+        ),
+      };
+    }
+    case 'player-joined':
+      return {
+        ...state,
+        players: [...state.players.filter((p) => p.id !== delta.player.id), delta.player],
+      };
+    case 'player-disconnected':
+      return {
+        ...state,
+        players: state.players.map((p) =>
+          p.id === delta.id ? { ...p, connected: false } : p,
+        ),
+      };
+    case 'player-removed':
+      return { ...state, players: state.players.filter((p) => p.id !== delta.id) };
+  }
 }
 
 // Average of numeric votes only ('?' and non-votes excluded), from connected

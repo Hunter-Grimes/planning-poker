@@ -13,13 +13,22 @@ const usePeerHostMock = vi.mocked(usePeerHost);
 
 const ROOM = 'ROOM01';
 
+// The host's own game state always names ROOM as host and seeds the host player;
+// tests layer their specifics (votes, components, phase) on top via overrides.
+const hostState = (overrides = {}) =>
+  makeGameState({
+    hostId: ROOM,
+    players: [makePlayer({ id: ROOM, name: 'Host' })],
+    ...overrides,
+  });
+
+// NOTE: the action fields are listed explicitly on purpose — the
+// `: UsePeerHostReturn` return type makes the compiler flag any method added to
+// the hook until it's mocked here, so this can't silently fall out of date.
 function hostHook(overrides: Partial<UsePeerHostReturn> = {}): UsePeerHostReturn {
   return {
     roomId: ROOM,
-    gameState: makeGameState({
-      hostId: ROOM,
-      players: [makePlayer({ id: ROOM, name: 'Host' })],
-    }),
+    gameState: hostState(),
     pendingPlayers: [],
     error: null,
     reveal: vi.fn(),
@@ -82,8 +91,7 @@ describe('HostRoom — voting phase', () => {
 
   it('labels Reveal with progress until everyone has voted', () => {
     renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         players: [makePlayer({ id: ROOM, name: 'Host' }), makePlayer({ id: 'g1', name: 'A' })],
       }),
     });
@@ -93,8 +101,7 @@ describe('HostRoom — voting phase', () => {
   it('shows the bare Reveal label and calls reveal() once all have voted', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         players: [makePlayer({ id: ROOM, name: 'Host', vote: 5 })],
       }),
     });
@@ -107,8 +114,7 @@ describe('HostRoom — voting phase', () => {
   it('auto-reveals when the toggle is on and everyone has voted', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         players: [makePlayer({ id: ROOM, name: 'Host', vote: 5 })],
       }),
     });
@@ -127,8 +133,7 @@ describe('HostRoom — voting phase', () => {
   it('restarts the round in place without advancing the counter', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         players: [makePlayer({ id: ROOM, name: 'Host', vote: 5 })],
       }),
     });
@@ -158,8 +163,7 @@ describe('HostRoom — revealed and summary controls', () => {
   it('offers Re-vote and Finish on the last component', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         revealed: true,
         activeComponentId: 's1',
         components: [makeComponent({ id: 's1', label: 'Only', average: null })],
@@ -178,8 +182,7 @@ describe('HostRoom — revealed and summary controls', () => {
   it('offers "Next Ticket" instead of Finish when there are no components', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         revealed: true,
         activeComponentId: null,
         components: [],
@@ -193,8 +196,7 @@ describe('HostRoom — revealed and summary controls', () => {
 
   it('labels the advance button "Next Component" when more components remain', () => {
     renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         revealed: true,
         activeComponentId: 's1',
         components: [makeComponent({ id: 's1' }), makeComponent({ id: 's2' })],
@@ -207,15 +209,13 @@ describe('HostRoom — revealed and summary controls', () => {
   it('renders the summary with a total and starts a new ticket', async () => {
     const user = userEvent.setup();
     const { hook } = renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         phase: 'summary',
         activeComponentId: null,
         components: [
           makeComponent({ id: 's1', label: 'A', average: 3 }),
           makeComponent({ id: 's2', label: 'B', average: 5 }),
         ],
-        players: [makePlayer({ id: ROOM, name: 'Host' })],
       }),
     });
     expect(screen.getByText('Estimate Summary')).toBeInTheDocument();
@@ -230,11 +230,9 @@ describe('HostRoom — revealed and summary controls', () => {
 describe('HostRoom — component list', () => {
   const withActiveComponent = () =>
     renderHost({
-      gameState: makeGameState({
-        hostId: ROOM,
+      gameState: hostState({
         activeComponentId: 's1',
         components: [makeComponent({ id: 's1', label: 'Active', enabled: true, average: null })],
-        players: [makePlayer({ id: ROOM, name: 'Host' })],
       }),
     });
 

@@ -51,7 +51,7 @@ describe('isPeerMessage', () => {
     });
   });
 
-  it.each(['approved', 'active', 'reveal', 'new-round'])('accepts the bare %s message', (type) => {
+  it.each(['approved', 'active', 'request-resync'])('accepts the bare %s message', (type) => {
     expect(isPeerMessage({ type })).toBe(true);
   });
 
@@ -62,42 +62,94 @@ describe('isPeerMessage', () => {
     });
   });
 
-  describe('state (validates the embedded GameState)', () => {
-    it('accepts a well-formed state', () => {
+  describe('state deltas', () => {
+    it.each(['voted', 'unvoted', 'player-active', 'player-disconnected', 'player-removed'])(
+      'accepts a versioned %s with an id',
+      (type) => {
+        expect(isPeerMessage({ type, version: 2, id: 'guest1' })).toBe(true);
+      },
+    );
+
+    it('rejects an id-bearing delta without a version', () => {
+      expect(isPeerMessage({ type: 'voted', id: 'guest1' })).toBe(false);
+    });
+
+    it('rejects an id-bearing delta with an empty id', () => {
+      expect(isPeerMessage({ type: 'voted', version: 1, id: '' })).toBe(false);
+    });
+
+    it('accepts a reveal carrying well-formed votes', () => {
+      expect(
+        isPeerMessage({ type: 'reveal', version: 4, votes: [['a', 5], ['b', '?']] }),
+      ).toBe(true);
+      expect(isPeerMessage({ type: 'reveal', version: 4, votes: [] })).toBe(true);
+    });
+
+    it('rejects a reveal with a bad vote value', () => {
+      expect(isPeerMessage({ type: 'reveal', version: 4, votes: [['a', 7]] })).toBe(false);
+      expect(isPeerMessage({ type: 'reveal', version: 4, votes: [['a']] })).toBe(false);
+    });
+
+    it('accepts a player-joined with a valid player', () => {
+      expect(
+        isPeerMessage({ type: 'player-joined', version: 3, player: makePlayer({ id: 'g1' }) }),
+      ).toBe(true);
+    });
+
+    it('rejects a player-joined with an invalid player', () => {
+      expect(
+        isPeerMessage({ type: 'player-joined', version: 3, player: { id: '', name: 'x' } }),
+      ).toBe(false);
+    });
+  });
+
+  describe('snapshot (validates the embedded GameState)', () => {
+    it('accepts a well-formed snapshot', () => {
       const state = makeGameState({
         players: [makePlayer({ vote: 5 })],
         components: [makeComponent({ average: 3 })],
         hostId: 'host',
       });
-      expect(isPeerMessage({ type: 'state', state })).toBe(true);
+      expect(isPeerMessage({ type: 'snapshot', version: 0, state })).toBe(true);
     });
 
-    it('rejects a state with a bad player', () => {
+    it('rejects a snapshot without a version', () => {
+      expect(isPeerMessage({ type: 'snapshot', state: makeGameState() })).toBe(false);
+    });
+
+    it('rejects a snapshot with a bad player', () => {
       const state = makeGameState({
         players: [{ id: '', name: 'x', vote: null, connected: true }],
       });
-      expect(isPeerMessage({ type: 'state', state })).toBe(false);
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(false);
     });
 
-    it('rejects a state with an invalid vote on a player', () => {
+    it('rejects a snapshot with an invalid vote on a player', () => {
       const state = makeGameState({
         players: [{ id: 'p', name: 'x', vote: 7, connected: true } as never],
       });
-      expect(isPeerMessage({ type: 'state', state })).toBe(false);
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(false);
     });
 
-    it('rejects a state with a non-finite round', () => {
-      expect(isPeerMessage({ type: 'state', state: makeGameState({ round: NaN }) })).toBe(false);
+    it('rejects a snapshot with a non-finite round', () => {
+      expect(
+        isPeerMessage({ type: 'snapshot', version: 1, state: makeGameState({ round: NaN }) }),
+      ).toBe(false);
     });
 
-    it('rejects a state with an unknown phase', () => {
+    it('rejects a snapshot with an unknown phase', () => {
       const state = { ...makeGameState(), phase: 'paused' } as never;
-      expect(isPeerMessage({ type: 'state', state })).toBe(false);
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(false);
     });
 
     it('rejects a component whose average is not finite', () => {
       const state = makeGameState({ components: [makeComponent({ average: Infinity as never })] });
-      expect(isPeerMessage({ type: 'state', state })).toBe(false);
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(false);
     });
+  });
+
+  it('rejects the retired state and new-round message types', () => {
+    expect(isPeerMessage({ type: 'state', state: makeGameState() })).toBe(false);
+    expect(isPeerMessage({ type: 'new-round' })).toBe(false);
   });
 });
