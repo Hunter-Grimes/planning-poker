@@ -76,6 +76,39 @@ describe('usePeerClient', () => {
     expect(conn.sent).toContainEqual({ type: 'active' } satisfies PeerMessage);
   });
 
+  it('errors out instead of hanging when the channel never opens', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => usePeerClient('ROOM01', 'Guest', 'pid-g'));
+      const peer = lastPeer();
+      act(() => peer.fireOpen('CLIENT01'));
+      // Connection created but ICE never completes — no 'open', no 'error'.
+      expect(result.current.status).toBe('connecting');
+      act(() => vi.advanceTimersByTime(15000));
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toMatch(/could not reach the host/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the connect timeout once the channel opens', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => usePeerClient('ROOM01', 'Guest', 'pid-g'));
+      const peer = lastPeer();
+      act(() => peer.fireOpen('CLIENT01'));
+      const conn = peer.outgoing[0];
+      act(() => conn.fireOpen());
+      expect(result.current.status).toBe('pending');
+      // Well past the timeout — status must not flip to error.
+      act(() => vi.advanceTimersByTime(30000));
+      expect(result.current.status).toBe('pending');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('closes inbound connections from non-host peers', () => {
     const { peer } = connectClient();
     const intruder = new FakeConnection('some-other-guest');

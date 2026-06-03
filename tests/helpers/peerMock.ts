@@ -73,10 +73,12 @@ export class FakePeer extends Emitter {
   /** Connections created via `peer.connect(...)` (the client → host link). */
   outgoing: FakeConnection[] = [];
 
-  constructor(id?: string) {
+  // Mirror PeerJS's real overloads: new Peer(options) or new Peer(id, options).
+  // A leading object is the options bag, not an id — don't mistake it for one.
+  constructor(idOrOptions?: string | object, _options?: object) {
     super();
-    this.requestedId = id;
-    this.id = id ?? '';
+    this.requestedId = typeof idOrOptions === 'string' ? idOrOptions : undefined;
+    this.id = this.requestedId ?? '';
     peerInstances.push(this);
   }
 

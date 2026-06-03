@@ -56,8 +56,39 @@ component. When every component is estimated the room shows an **Estimate
 Summary** with the per-component averages and a total. "New Ticket" resets the
 averages to start a fresh round of estimation.
 
+## Connectivity (STUN / TURN)
+
+Peers find each other through the public PeerJS broker, then open a direct
+WebRTC data channel. Traversing NAT needs ICE servers, configured in
+[`peerConfig.ts`](src/peerConfig.ts). The default is a STUN-only pool, which is
+enough when at least one peer is directly reachable.
+
+On restrictive networks — symmetric NAT, corporate firewalls, VPNs — STUN can't
+punch through and a guest will reach the room but never connect ("Connecting…"
+then an error). That case needs a **TURN relay**, supplied via build-time env
+vars (e.g. in a `.env` file or your CI secrets):
+
+```bash
+VITE_TURN_URL=turn:turn.example.com:3478,turns:turn.example.com:5349
+VITE_TURN_USERNAME=your-username
+VITE_TURN_CREDENTIAL=your-credential
+```
+
+`VITE_TURN_URL` is comma-separated so one credential can advertise several
+transports. Get credentials from a TURN provider (e.g. metered.ca, Twilio) or
+self-host [coturn](https://github.com/coturn/coturn). Without TURN, strict-NAT
+clients can't connect — there is no free reliable public relay to fall back on.
+
+If a guest gets stuck connecting, it now fails with an error after ~15s instead
+of hanging. To see exactly where the handshake breaks, set `VITE_PEER_DEBUG=3`
+and watch the browser console — a stuck `iceConnectionState` of `checking` or a
+`failed` state means the network is blocking peer-to-peer traffic (common with
+Wi-Fi "client isolation" / guest networks), which is what TURN is for.
+
 ## Deployment
 
 The app is a static bundle. `npm run build` emits to `dist/`. It is configured
 for GitHub Pages under the `/planning-poker/` path — see the `base` option in
-[`vite.config.ts`](vite.config.ts) if you deploy elsewhere.
+[`vite.config.ts`](vite.config.ts) if you deploy elsewhere. To enable TURN in a
+GitHub Pages build, set the `VITE_TURN_*` values as repository secrets and pass
+them as env to the `npm run build` step in [`deploy.yml`](.github/workflows/deploy.yml).

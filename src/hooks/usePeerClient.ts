@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { CardValue, GameState, PeerMessage, isPeerMessage } from '../types';
+import { peerConfig } from '../peerConfig';
 
 export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
 
@@ -26,15 +27,48 @@ export function usePeerClient(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const peer = new Peer();
+    const peer = new Peer(peerConfig);
     peerRef.current = peer;
+
+    // WebRTC can stall during ICE negotiation without ever firing 'open' or
+    // 'error' — the guest would then sit on "Connecting…" forever. Guard the
+    // initial handshake with a timeout that surfaces an actionable error, and
+    // track the ICE state along the way so the logs can say *why* it stalled.
+    const CONNECT_TIMEOUT_MS = 15000;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastIceState: RTCIceConnectionState | 'unknown' = 'unknown';
+    const clearConnectTimer = () => {
+      if (connectTimer !== undefined) {
+        clearTimeout(connectTimer);
+        connectTimer = undefined;
+      }
+    };
 
     peer.on('open', (id) => {
       setMyId(id);
       const conn = peer.connect(roomId, { reliable: true });
       connRef.current = conn;
 
+      connectTimer = setTimeout(() => {
+        if (connRef.current?.open) return; // channel opened in the meantime
+        console.warn(
+          `[usePeerClient] connect timed out (channelOpen=${conn.open}, iceState=${lastIceState})`,
+        );
+        setError(
+          'Could not reach the host. The network may be blocking peer-to-peer ' +
+            '(WebRTC) connections, or the host is no longer online.',
+        );
+        setStatus('error');
+      }, CONNECT_TIMEOUT_MS);
+
+      // PeerJS surfaces the underlying ICE state here — 'failed'/'disconnected'
+      // or a stuck 'checking' is the signature of a network blocking P2P.
+      conn.on('iceStateChanged', (state) => {
+        lastIceState = state;
+      });
+
       conn.on('open', () => {
+        clearConnectTimer();
         setStatus('pending');
         const msg: PeerMessage = { type: 'request-join', name: playerName, persistentId };
         conn.send(msg);
@@ -53,8 +87,12 @@ export function usePeerClient(
         }
       });
 
-      conn.on('close', () => setStatus('disconnected'));
+      conn.on('close', () => {
+        clearConnectTimer();
+        setStatus('disconnected');
+      });
       conn.on('error', (err) => {
+        clearConnectTimer();
         setError(err.message);
         setStatus('error');
       });
@@ -73,6 +111,7 @@ export function usePeerClient(
     });
 
     peer.on('error', (err) => {
+      clearConnectTimer();
       setError(err.message);
       setStatus('error');
     });
@@ -89,6 +128,7 @@ export function usePeerClient(
     });
 
     return () => {
+      clearConnectTimer();
       peer.destroy();
     };
   }, [roomId, playerName, persistentId]);
