@@ -12,10 +12,6 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -35,6 +31,11 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # Scoped to the deploy job so a PR's test run can't cancel a live deploy;
+    # back-to-back pushes to main still supersede one another.
+    concurrency:
+      group: pages
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -32,20 +32,41 @@ Then open the printed URL. To play across machines, share the room code (or the
 | `npm run test:watch`    | Run tests in watch mode.                                           |
 | `npm run test:coverage` | Run tests with a V8 coverage report.                               |
 
+## Project structure
+
+```
+src/
+  app/          App bootstrap — root component, screen routing, render entry (main.tsx)
+  domain/       Pure model + rules (no I/O): types, validation guards, gameLogic reducers, cardColors
+  lib/          Side-effecting utilities: storage (localStorage), peerConfig (ICE/WebRTC), id, cn
+  hooks/        React hooks: usePeerHost, usePeerClient, useTheme
+  components/
+    screens/    Top-level views App routes to: Home, Join, HostRoom, GuestRoom
+    room/        In-room feature pieces: CardDeck, PlayerList, ResultsView, ComponentList, …
+    ui/          Reusable, domain-agnostic primitives: Button, Input, Surface, ThemeToggle, tokens
+  styles/       Global CSS
+tests/          Vitest suite, mirroring the source tree (+ helpers/ for factories and the PeerJS mock)
+```
+
+The key boundary is `domain/` (pure, trivially testable) versus `lib/` (the I/O
+edge). Most folders expose a barrel `index.ts` so callers import from the folder
+(e.g. `from '../room'`) rather than reaching into individual files.
+
 ## How it works
 
 - **Host vs. guest.** [`usePeerHost`](src/hooks/usePeerHost.ts) owns the room: it
   holds the authoritative `GameState`, approves/kicks players, and broadcasts
   state. [`usePeerClient`](src/hooks/usePeerClient.ts) connects a guest to the
-  host and relays votes. [`App`](src/App.tsx) routes between the home, join, host,
-  and guest screens and restores sessions from `localStorage`.
+  host and relays votes. [`App`](src/app/App.tsx) routes between the home, join,
+  host, and guest screens and restores sessions from `localStorage`.
 - **Authoritative state + redaction.** All game transitions are pure reducers in
-  [`gameLogic.ts`](src/gameLogic.ts). Before broadcasting, the host calls
+  [`gameLogic.ts`](src/domain/gameLogic.ts). Before broadcasting, the host calls
   `redactForClient` so other players' votes stay hidden until reveal (each guest
   still sees their own, plus a `hasVoted` flag).
 - **Messages are validated.** Every inbound `PeerMessage` is checked with the
-  runtime type guards in [`types.ts`](src/types.ts) before it can touch state.
-- **Persistence.** [`storage.ts`](src/storage.ts) wraps `localStorage` for host
+  runtime type guards in [`validation.ts`](src/domain/validation.ts) before it can
+  touch state.
+- **Persistence.** [`storage.ts`](src/lib/storage.ts) wraps `localStorage` for host
   and guest session restore and for the in-progress story backlog.
 
 ## Estimation flow
@@ -60,7 +81,7 @@ averages to start a fresh round of estimation.
 
 Peers find each other through the public PeerJS broker, then open a direct
 WebRTC data channel. Traversing NAT needs ICE servers, configured in
-[`peerConfig.ts`](src/peerConfig.ts). The default is a STUN-only pool, which is
+[`peerConfig.ts`](src/lib/peerConfig.ts). The default is a STUN-only pool, which is
 enough when at least one peer is directly reachable.
 
 On restrictive networks — symmetric NAT, corporate firewalls, VPNs, mobile data —

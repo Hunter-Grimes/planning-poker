@@ -1,5 +1,5 @@
 import { HTMLAttributes, ReactNode } from 'react';
-import { cn } from '../../cn';
+import { cn } from '../../lib/cn';
 import { CARD_SURFACE, PANEL_SURFACE } from './tokens';
 
 // Raised surface (white card). Radius/padding/layout come from className.

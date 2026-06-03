@@ -1,5 +1,5 @@
 import { ButtonHTMLAttributes } from 'react';
-import { cn } from '../../cn';
+import { cn } from '../../lib/cn';
 import {
   BUTTON_SIZES,
   BUTTON_VARIANTS,

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { DataConnection } from 'peerjs';
-import { CardValue, GameState, PeerMessage, isPeerMessage } from '../types';
-import { getPeerConfig } from '../peerConfig';
+import { CardValue, GameState, PeerMessage } from '../domain/types';
+import { isPeerMessage } from '../domain/validation';
+import { getPeerConfig } from '../lib/peerConfig';
 
 export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
 

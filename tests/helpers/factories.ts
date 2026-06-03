@@ -1,4 +1,4 @@
-import { CardValue, GameState, Player, Component } from '../../src/types';
+import { CardValue, GameState, Player, Component } from '../../src/domain/types';
 
 let seq = 0;
 const nextId = (prefix: string) => `${prefix}-${++seq}`;

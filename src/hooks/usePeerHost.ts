@@ -7,13 +7,13 @@ import {
   PendingEntry,
   Player,
   Component,
-  isPeerMessage,
-  randomId,
   MAX_PLAYERS,
   MAX_COMPONENT_LABEL_LENGTH,
-} from '../types';
-import * as game from '../gameLogic';
-import { getPeerConfig } from '../peerConfig';
+} from '../domain/types';
+import { isPeerMessage } from '../domain/validation';
+import { randomId } from '../lib/id';
+import * as game from '../domain/gameLogic';
+import { getPeerConfig } from '../lib/peerConfig';
 
 // Send a rejection message, then close shortly after so the message has time to
 // flush across the data channel before the connection tears down.

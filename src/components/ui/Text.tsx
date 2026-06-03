@@ -1,5 +1,5 @@
 import { HTMLAttributes, LabelHTMLAttributes } from 'react';
-import { cn } from '../../cn';
+import { cn } from '../../lib/cn';
 import { HEADING_BASE, HEADING_TONES, HeadingTone } from './tokens';
 
 interface SectionHeadingProps extends HTMLAttributes<HTMLHeadingElement> {

@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { cn } from '../../cn';
+import { cn } from '../../lib/cn';
 import { PAGE_BG } from './tokens';
 
 // Full-height, centred layout for the entry screens. `topRight` pins an action

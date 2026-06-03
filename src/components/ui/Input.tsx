@@ -1,5 +1,5 @@
 import { InputHTMLAttributes, Ref } from 'react';
-import { cn } from '../../cn';
+import { cn } from '../../lib/cn';
 import { INPUT_VARIANTS, InputVariant } from './tokens';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
