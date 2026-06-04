@@ -19,8 +19,44 @@ import {
   reveal,
   setActive,
   toggleComponent,
+  electHost,
 } from '../../src/domain/gameLogic';
 import { makeGameState, makePlayer, makeComponent, voter } from '../helpers/factories';
+
+describe('electHost', () => {
+  it('picks the connected non-host player with the smallest id', () => {
+    const state = makeGameState({
+      hostId: 'host',
+      players: [
+        makePlayer({ id: 'host', connected: true }),
+        makePlayer({ id: 'ccc', connected: true }),
+        makePlayer({ id: 'aaa', connected: true }),
+        makePlayer({ id: 'bbb', connected: true }),
+      ],
+    });
+    expect(electHost(state)!.id).toBe('aaa');
+  });
+
+  it('ignores the current host and disconnected players', () => {
+    const state = makeGameState({
+      hostId: 'aaa', // smallest id, but it is the (gone) host
+      players: [
+        makePlayer({ id: 'aaa', connected: true }),
+        makePlayer({ id: 'bbb', connected: false }),
+        makePlayer({ id: 'ccc', connected: true }),
+      ],
+    });
+    expect(electHost(state)!.id).toBe('ccc');
+  });
+
+  it('returns null when nobody is eligible', () => {
+    const state = makeGameState({
+      hostId: 'aaa',
+      players: [makePlayer({ id: 'aaa', connected: true }), makePlayer({ id: 'bbb', connected: false })],
+    });
+    expect(electHost(state)).toBeNull();
+  });
+});
 
 describe('computeAverage', () => {
   it('averages numeric votes only', () => {

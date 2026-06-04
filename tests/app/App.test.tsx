@@ -6,20 +6,16 @@ import { makeComponent } from '../helpers/factories';
 
 // App's only job is routing: pick a screen from the URL + saved sessions and
 // wire props in. Stub the screens (as components returning a marker string) so
-// these tests exercise that decision in isolation — no peer hooks, no screen
-// internals, no mount effects. Markers echo the props App passes down.
+// these tests exercise that decision in isolation. Markers echo the props.
 vi.mock('../../src/components/screens', () => ({
   HomeScreen: () => 'home-screen',
   JoinScreen: (props: { roomId: string }) => `join-screen:${props.roomId}`,
-  HostRoom: (props: { hostName: string; roomCode?: string }) =>
-    `host-screen:${props.hostName}:${props.roomCode}`,
-  GuestRoom: (props: { roomId: string; playerName: string }) =>
-    `guest-screen:${props.roomId}:${props.playerName}`,
+  Room: (props: { roomCode: string; playerName: string; intent: string }) =>
+    `room:${props.intent}:${props.roomCode}:${props.playerName}`,
 }));
 
 beforeEach(() => {
   localStorage.clear();
-  // jsdom carries the URL across tests; reset it so a stray ?room= can't leak.
   window.history.replaceState({}, '', '/');
 });
 
@@ -33,16 +29,16 @@ describe('App — initial routing', () => {
     expect(screen.getByText('home-screen')).toBeInTheDocument();
   });
 
-  it('restores the host screen from a saved host session', () => {
-    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedPlayers: {} });
+  it('restores a create-intent room from a saved host session', () => {
+    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedHandles: {} });
     render(<App />);
-    expect(screen.getByText('host-screen:Dana:ABC234')).toBeInTheDocument();
+    expect(screen.getByText('room:create:ABC234:Dana')).toBeInTheDocument();
   });
 
-  it('restores the guest screen from a saved guest session', () => {
+  it('restores a join-intent room from a saved guest session', () => {
     storage.saveGuest({ roomCode: 'ABC234', playerName: 'Eve', persistentId: 'pid-2' });
     render(<App />);
-    expect(screen.getByText('guest-screen:ABC234:Eve')).toBeInTheDocument();
+    expect(screen.getByText('room:join:ABC234:Eve')).toBeInTheDocument();
   });
 
   it('opens the join form from a ?room= invite link', () => {
@@ -52,11 +48,11 @@ describe('App — initial routing', () => {
   });
 
   it('lets an invite link win over a stored host session', () => {
-    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedPlayers: {} });
+    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedHandles: {} });
     window.history.replaceState({}, '', '/?room=ZZZ234');
     render(<App />);
     expect(screen.getByText('join-screen:ZZZ234')).toBeInTheDocument();
-    expect(screen.queryByText(/^host-screen/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^room:/)).not.toBeInTheDocument();
   });
 
   it('clears orphaned components when restoring without a host session', () => {
@@ -69,7 +65,7 @@ describe('App — initial routing', () => {
   it('keeps stored components when a host session owns them', () => {
     const components = [makeComponent({ id: 's1' })];
     storage.saveComponents(components);
-    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedPlayers: {} });
+    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedHandles: {} });
     render(<App />);
     expect(storage.getComponents()).toEqual(components);
   });

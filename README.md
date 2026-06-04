@@ -39,9 +39,9 @@ src/
   app/          App bootstrap — root component, screen routing, render entry (main.tsx)
   domain/       Pure model + rules (no I/O): types, validation guards, gameLogic reducers, cardColors
   lib/          Side-effecting utilities: storage (localStorage), peerConfig (ICE/WebRTC), id, cn
-  hooks/        React hooks: usePeerHost, usePeerClient, useTheme
+  hooks/        React hooks: useRoom (rotating-host P2P engine), useTheme
   components/
-    screens/    Top-level views App routes to: Home, Join, HostRoom, GuestRoom
+    screens/    Top-level views App routes to: Home, Join, Room
     room/        In-room feature pieces: CardDeck, PlayerList, ResultsView, ComponentList, …
     ui/          Reusable, domain-agnostic primitives: Button, Input, Surface, ThemeToggle, tokens
   styles/       Global CSS
@@ -54,11 +54,22 @@ edge). Most folders expose a barrel `index.ts` so callers import from the folder
 
 ## How it works
 
-- **Host vs. guest.** [`usePeerHost`](src/hooks/usePeerHost.ts) owns the room: it
-  holds the authoritative `GameState`, approves/kicks players, and broadcasts
-  state. [`usePeerClient`](src/hooks/usePeerClient.ts) connects a guest to the
-  host and relays votes. [`App`](src/app/App.tsx) routes between the home, join,
-  host, and guest screens and restores sessions from `localStorage`.
+- **One room engine, rotating host.** [`useRoom`](src/hooks/useRoom.ts) runs the
+  whole P2P lifecycle with a single role machine (`electing → host | guest`). The
+  *current* host always holds `Peer(roomCode)` — the only address joiners know —
+  so whoever claims it on the broker is host and everyone else connects as a
+  guest. [`App`](src/app/App.tsx) routes between the home, join, and `Room`
+  screens (with a `create`/`join` intent) and restores sessions from `localStorage`.
+- **Host migration.** The original creator is the *preferred host*; the first to
+  connect when no host exists becomes a *temporary host*. If the host leaves
+  (without Close Room), a pure [`electHost`](src/domain/gameLogic.ts) picks the
+  next host deterministically and the round restarts (redaction means an
+  in-progress round can't be resumed losslessly). When the preferred host
+  returns it reclaims control via a signed `claim-host` handoff
+  ([`hostIdentity.ts`](src/lib/hostIdentity.ts), ECDSA P-256 — the public key
+  rides in the invite link's `#k=` fragment; degrades to a handle match + a
+  visible warning off secure contexts). Approvals are distributed to every
+  client as per-room hashed handles so migration needs no re-verification.
 - **Authoritative state + redaction.** All game transitions are pure reducers in
   [`gameLogic.ts`](src/domain/gameLogic.ts). Before broadcasting, the host calls
   `redactForClient` so other players' votes stay hidden until reveal (each guest
@@ -67,7 +78,9 @@ edge). Most folders expose a barrel `index.ts` so callers import from the folder
   runtime type guards in [`validation.ts`](src/domain/validation.ts) before it can
   touch state.
 - **Persistence.** [`storage.ts`](src/lib/storage.ts) wraps `localStorage` for host
-  and guest session restore and for the in-progress story backlog.
+  and guest session restore, the in-progress story backlog, a stable per-browser
+  client id, and (per room) the preferred host's keypair so a returning creator
+  can re-sign a takeover.
 
 ## Estimation flow
 
@@ -86,7 +99,8 @@ enough when at least one peer is directly reachable.
 
 On restrictive networks — symmetric NAT, corporate firewalls, VPNs, mobile data —
 STUN can't punch through and a guest will reach the room but never connect
-("Connecting…" then an error after ~15s). That case needs a **TURN relay**.
+("Connecting…", then "Still trying to reach the room…" with a back-out option as
+it keeps retrying with backoff). That case needs a **TURN relay**.
 
 ### TURN via Metered (recommended)
 

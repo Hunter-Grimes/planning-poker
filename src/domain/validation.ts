@@ -39,6 +39,20 @@ function isComponent(v: unknown): v is Component {
   return true;
 }
 
+function isStringRecord(v: unknown): v is Record<string, string> {
+  if (typeof v !== 'object' || v === null) return false;
+  return Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
+}
+
+function isPreferredHost(v: unknown): boolean {
+  if (v === null) return true;
+  if (typeof v !== 'object') return false;
+  const p = v as Record<string, unknown>;
+  if (typeof p.handle !== 'string' || p.handle.length === 0) return false;
+  if (p.pubKey !== null && typeof p.pubKey !== 'string') return false;
+  return true;
+}
+
 function isGameState(v: unknown): v is GameState {
   if (typeof v !== 'object' || v === null) return false;
   const s = v as Record<string, unknown>;
@@ -49,6 +63,9 @@ function isGameState(v: unknown): v is GameState {
   if (s.activeComponentId !== null && typeof s.activeComponentId !== 'string') return false;
   if (!isGamePhase(s.phase)) return false;
   if (s.hostId !== null && typeof s.hostId !== 'string') return false;
+  if (!isPreferredHost(s.preferredHost)) return false;
+  if (typeof s.migrationEpoch !== 'number' || !Number.isFinite(s.migrationEpoch)) return false;
+  if (!isStringRecord(s.approvedHandles)) return false;
   return true;
 }
 
@@ -84,16 +101,27 @@ export function isPeerMessage(raw: unknown): raw is PeerMessage {
         typeof msg.name === 'string' &&
         msg.name.length >= 1 &&
         msg.name.length <= MAX_NAME_LENGTH &&
-        typeof msg.persistentId === 'string' &&
-        msg.persistentId.length > 0
+        typeof msg.handle === 'string' &&
+        msg.handle.length > 0
       );
     case 'vote':
       return isCardValue(msg.value);
     case 'active':
     case 'request-resync':
       return true;
+    case 'claim-host':
+      return (
+        isNonEmptyString(msg.handle) &&
+        typeof msg.epoch === 'number' &&
+        Number.isFinite(msg.epoch) &&
+        isNonEmptyString(msg.nonce) &&
+        // Bounded to keep a malicious peer from sending a huge string. A real
+        // ECDSA P-256 signature is ~64 bytes → ~88 base64 chars.
+        (msg.sig === null || (typeof msg.sig === 'string' && msg.sig.length <= 512))
+      );
     // --- host → client (unversioned control) -------------------------------
     case 'approved':
+    case 'room-closed':
       return true;
     case 'rejected':
       return typeof msg.reason === 'string';

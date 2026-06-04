@@ -22,20 +22,20 @@ describe('isPeerMessage', () => {
 
   describe('request-join', () => {
     it('accepts a valid request', () => {
-      expect(isPeerMessage({ type: 'request-join', name: 'Bob', persistentId: 'pid' })).toBe(true);
+      expect(isPeerMessage({ type: 'request-join', name: 'Bob', handle: 'h1' })).toBe(true);
     });
 
     it('rejects an empty name', () => {
-      expect(isPeerMessage({ type: 'request-join', name: '', persistentId: 'pid' })).toBe(false);
+      expect(isPeerMessage({ type: 'request-join', name: '', handle: 'h1' })).toBe(false);
     });
 
     it('rejects an over-length name', () => {
       const name = 'x'.repeat(MAX_NAME_LENGTH + 1);
-      expect(isPeerMessage({ type: 'request-join', name, persistentId: 'pid' })).toBe(false);
+      expect(isPeerMessage({ type: 'request-join', name, handle: 'h1' })).toBe(false);
     });
 
-    it('rejects a missing persistentId', () => {
-      expect(isPeerMessage({ type: 'request-join', name: 'Bob', persistentId: '' })).toBe(false);
+    it('rejects a missing handle', () => {
+      expect(isPeerMessage({ type: 'request-join', name: 'Bob', handle: '' })).toBe(false);
     });
   });
 
@@ -51,14 +51,53 @@ describe('isPeerMessage', () => {
     });
   });
 
-  it.each(['approved', 'active', 'request-resync'])('accepts the bare %s message', (type) => {
-    expect(isPeerMessage({ type })).toBe(true);
-  });
+  it.each(['approved', 'active', 'request-resync', 'room-closed'])(
+    'accepts the bare %s message',
+    (type) => {
+      expect(isPeerMessage({ type })).toBe(true);
+    },
+  );
 
   describe('rejected', () => {
     it('requires a string reason', () => {
       expect(isPeerMessage({ type: 'rejected', reason: 'full' })).toBe(true);
       expect(isPeerMessage({ type: 'rejected' })).toBe(false);
+    });
+  });
+
+  describe('claim-host', () => {
+    it('accepts a well-formed claim with or without a signature', () => {
+      expect(
+        isPeerMessage({ type: 'claim-host', handle: 'h1', epoch: 2, nonce: 'n', sig: 'abc' }),
+      ).toBe(true);
+      expect(
+        isPeerMessage({ type: 'claim-host', handle: 'h1', epoch: 2, nonce: 'n', sig: null }),
+      ).toBe(true);
+    });
+
+    it('rejects missing or malformed fields', () => {
+      expect(isPeerMessage({ type: 'claim-host', handle: 'h1', epoch: 2, nonce: 'n' })).toBe(false);
+      expect(
+        isPeerMessage({ type: 'claim-host', handle: '', epoch: 2, nonce: 'n', sig: null }),
+      ).toBe(false);
+      expect(
+        isPeerMessage({ type: 'claim-host', handle: 'h1', epoch: 'x', nonce: 'n', sig: null }),
+      ).toBe(false);
+      expect(
+        isPeerMessage({ type: 'claim-host', handle: 'h1', epoch: 2, nonce: '', sig: null }),
+      ).toBe(false);
+    });
+  });
+
+  describe('snapshot preferredHost', () => {
+    it('accepts a null or well-formed preferred host', () => {
+      const state = makeGameState({ preferredHost: { handle: 'h1', pubKey: null } });
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(true);
+    });
+
+    it('rejects a malformed preferred host', () => {
+      const state = { ...makeGameState(), preferredHost: { pubKey: 'k' } };
+      expect(isPeerMessage({ type: 'snapshot', version: 1, state })).toBe(false);
     });
   });
 

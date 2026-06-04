@@ -32,6 +32,9 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     activeComponentId: overrides.activeComponentId ?? null,
     phase: overrides.phase ?? 'voting',
     hostId: overrides.hostId ?? null,
+    preferredHost: overrides.preferredHost ?? null,
+    migrationEpoch: overrides.migrationEpoch ?? 0,
+    approvedHandles: overrides.approvedHandles ?? {},
     ...overrides,
   };
 }

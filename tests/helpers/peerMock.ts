@@ -1,5 +1,5 @@
-// Minimal in-memory stand-in for PeerJS, good enough to drive usePeerHost /
-// usePeerClient in tests. Tests reach the live instances via `peerInstances`
+// Minimal in-memory stand-in for PeerJS, good enough to drive useRoom (host and
+// guest roles) in tests. Tests reach the live instances via `peerInstances`
 // and drive them with the `fire*` / `receive` helpers.
 //
 // Wire it up in a test with:

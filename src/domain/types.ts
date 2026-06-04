@@ -35,6 +35,18 @@ export interface Component {
 
 export type GamePhase = 'voting' | 'summary';
 
+// Identity of the room's *preferred* host (the original creator). Carried in
+// broadcast state so any client can recognise — and a temporary host can yield
+// back to — the real creator when they return. `handle` is the creator's
+// per-room handle (always present). `pubKey` is a base64url ECDSA P-256 raw
+// public key, present only when the room was created in a secure context; when
+// null, preferred-host claims fall back to a handle match plus a visible
+// "host changed" warning (see hostIdentity.ts).
+export interface PreferredHost {
+  handle: string;
+  pubKey: string | null;
+}
+
 export interface GameState {
   players: Player[];
   revealed: boolean;
@@ -42,9 +54,19 @@ export interface GameState {
   components: Component[];
   activeComponentId: string | null;
   phase: GamePhase;
-  // The host's peer id — explicitly threaded so the UI doesn't have to assume
-  // it equals the room code, and clients can identify the host without props.
+  // The *current* host's peer id — may be the room code (preferred host) or a
+  // derived `${roomCode}-h${migrationEpoch}` id (a temporary host). Clients
+  // follow this, not the static room code.
   hostId: string | null;
+  // Who is allowed to reclaim the room as preferred host. Pinned by clients on
+  // first sight (invite-link key or first snapshot) and not trusted to change.
+  preferredHost: PreferredHost | null;
+  // Bumped on every host change; feeds the derived temp-host peer id so a fresh
+  // generation never collides with a dead host's lingering broker registration.
+  migrationEpoch: number;
+  // Approved members as handle → name, distributed to every client so a player
+  // promoted to host can auto-approve returning guests without re-verification.
+  approvedHandles: Record<string, string>;
 }
 
 export interface PendingEntry {
@@ -79,14 +101,25 @@ export type StateDelta = StateDeltaBody & { version: number };
 
 export type PeerMessage =
   // --- client → host -------------------------------------------------------
-  | { type: 'request-join'; name: string; persistentId: string }
+  // `handle` is the joiner's per-room handle (see storage.getRoomHandle) — the
+  // stable, room-scoped id used for approval. The raw client id never goes on
+  // the wire.
+  | { type: 'request-join'; name: string; handle: string }
   | { type: 'vote'; value: CardValue }
   | { type: 'active' }
   // Sent when the client detects a version gap; host replies with a snapshot.
   | { type: 'request-resync' }
+  // A returning preferred host asks the current (temporary) host to hand back
+  // control. Carries the claimant's handle, a monotonic epoch + random nonce
+  // (replay protection), and a signature over `${roomCode}|${epoch}|${nonce}`
+  // (null when created without secure crypto — verified by handle match + warning).
+  | { type: 'claim-host'; handle: string; epoch: number; nonce: string; sig: string | null }
   // --- host → client (unversioned control) ---------------------------------
   | { type: 'approved' }
   | { type: 'rejected'; reason: string }
+  // The host is shutting the room down (Close Room button, or tab/window close).
+  // Terminal for clients — they stop trying to reconnect.
+  | { type: 'room-closed' }
   // --- host → client (versioned state sync) --------------------------------
   // Full state — sent on join, on resync, and on structural transitions
   // (round/phase/component changes) where a delta would be fragile.

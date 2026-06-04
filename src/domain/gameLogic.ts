@@ -323,3 +323,15 @@ export function setActive(state: GameState, peerId: string): GameState {
     players: state.players.map((p) => (p.id === peerId ? { ...p, active: true } : p)),
   };
 }
+
+// --- Host migration ---------------------------------------------------------
+
+// Deterministically pick the next host after the current one is lost: the
+// connected player with the smallest peer id, excluding the (now-gone) current
+// host. Pure and based only on shared state, so every surviving client computes
+// the same winner with zero coordination. Returns null when no one is left.
+export function electHost(state: GameState): Player | null {
+  const candidates = state.players.filter((p) => p.connected && p.id !== state.hostId);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, p) => (p.id < best.id ? p : best));
+}

@@ -5,7 +5,7 @@ import { makeComponent } from '../helpers/factories';
 const host: HostSession = {
   hostName: 'Dana',
   roomCode: 'ABC123',
-  approvedPlayers: { 'pid-1': 'Alice' },
+  approvedHandles: { 'h-1': 'Alice' },
 };
 
 const guest: GuestSession = {
@@ -40,22 +40,45 @@ describe('host session', () => {
   });
 });
 
-describe('approved players', () => {
-  it('adds a player without disturbing existing entries', () => {
+describe('approved handles', () => {
+  it('adds a handle without disturbing existing entries', () => {
     storage.saveHost(host);
-    storage.addApprovedPlayer('pid-9', 'Frank');
-    expect(storage.getHost()!.approvedPlayers).toEqual({ 'pid-1': 'Alice', 'pid-9': 'Frank' });
+    storage.addApprovedHandle('h-9', 'Frank');
+    expect(storage.getHost()!.approvedHandles).toEqual({ 'h-1': 'Alice', 'h-9': 'Frank' });
   });
 
-  it('removes a player', () => {
+  it('removes a handle', () => {
     storage.saveHost(host);
-    storage.removeApprovedPlayer('pid-1');
-    expect(storage.getHost()!.approvedPlayers).toEqual({});
+    storage.removeApprovedHandle('h-1');
+    expect(storage.getHost()!.approvedHandles).toEqual({});
   });
 
   it('is a no-op when there is no host session', () => {
-    storage.addApprovedPlayer('pid-1', 'Alice');
+    storage.addApprovedHandle('h-1', 'Alice');
     expect(storage.getHost()).toBeNull();
+  });
+});
+
+describe('room handle', () => {
+  it('is stable per room and differs across rooms', () => {
+    const a1 = storage.getRoomHandle('ROOM01');
+    const a2 = storage.getRoomHandle('ROOM01');
+    const b = storage.getRoomHandle('ROOM02');
+    expect(a1).toBe(a2); // stable for the same room
+    expect(a1).not.toBe(b); // uncorrelatable across rooms
+    expect(a1).not.toContain(storage.getClientId()); // not the raw client id
+  });
+});
+
+describe('host keypair', () => {
+  const key = { pubB64url: 'pub', privJwk: { kty: 'EC' } };
+
+  it('round-trips per room and clears', () => {
+    storage.saveHostKey('ROOM01', key);
+    expect(storage.getHostKey('ROOM01')).toEqual(key);
+    expect(storage.getHostKey('ROOM02')).toBeNull(); // namespaced by room
+    storage.clearHostKey('ROOM01');
+    expect(storage.getHostKey('ROOM01')).toBeNull();
   });
 });
 
@@ -85,6 +108,43 @@ describe('components', () => {
     storage.saveComponents([makeComponent()]);
     storage.clearComponents();
     expect(storage.getComponents()).toEqual([]);
+  });
+});
+
+describe('auto-reveal preference', () => {
+  it('defaults to false when unset', () => {
+    expect(storage.getAutoReveal()).toBe(false);
+  });
+
+  it('round-trips both values', () => {
+    storage.saveAutoReveal(true);
+    expect(storage.getAutoReveal()).toBe(true);
+    storage.saveAutoReveal(false);
+    expect(storage.getAutoReveal()).toBe(false);
+  });
+
+  it('survives clearing the host session', () => {
+    storage.saveAutoReveal(true);
+    storage.saveHost(host);
+    storage.clearHost();
+    expect(storage.getAutoReveal()).toBe(true);
+  });
+});
+
+describe('client id', () => {
+  it('mints an id on first read and returns the same one thereafter', () => {
+    const id = storage.getClientId();
+    expect(id).toBeTruthy();
+    expect(storage.getClientId()).toBe(id);
+  });
+
+  it('survives clearing the host and guest sessions', () => {
+    const id = storage.getClientId();
+    storage.saveHost(host);
+    storage.saveGuest(guest);
+    storage.clearHost();
+    storage.clearGuest();
+    expect(storage.getClientId()).toBe(id);
   });
 });
 
