@@ -63,6 +63,12 @@ const ESCALATE_AFTER_ATTEMPTS = 3;
 // How long a verified takeover suppresses self-election so only the preferred
 // host reclaims the room code.
 const DEFER_ELECTION_MS = 8000;
+// When the host announces it's closing its tab, guests re-elect at once. The
+// election winner claims the room code immediately; everyone else waits this
+// brief head start (and reconnects on this snappy cadence) so the new host has
+// claimed the code before they try to reach it — avoids a burst of
+// peer-unavailable retries against an id nobody holds yet.
+const HOST_HANDOFF_GRACE_MS = 600;
 const MIN_INTERVAL_MS = 50;
 
 interface ApiImpl {
@@ -191,6 +197,10 @@ export function useRoom({
     let deferElection = false;
     let claimSent = false;
     let lastClaimEpoch = -1;
+    // Announce-on-close guard: send `host-departing` at most once, and never
+    // after an explicit closeRoom() (which sends the terminal `room-closed`).
+    let departed = false;
+    let roomClosed = false;
 
     const clear = (t: ReturnType<typeof setTimeout> | undefined) => {
       if (t !== undefined) clearTimeout(t);
@@ -353,6 +363,30 @@ export function useRoom({
       beginDefer();
     };
 
+    // The host announced it's closing its tab. Re-elect a new host *now* rather
+    // than waiting out the multi-second WebRTC connection timeout: the election
+    // winner claims the room code immediately, everyone else reconnects to it
+    // after a short head start. Falls through to the normal reconnect/backoff
+    // path if the winner never shows (e.g. it was the one that just left).
+    const onHostDeparting = () => {
+      if (disposed || curRole !== 'guest') return;
+      synced = false;
+      stopTimers();
+      if (!disposed) setStatus('connecting');
+      // Snappy reconnect cadence for the brief handoff window.
+      backoff = HOST_HANDOFF_GRACE_MS;
+      const winner = state ? game.electHost(state) : null;
+      if (winner && myPeerId && winner.id === myPeerId) {
+        attempt(); // I'm the new host — claim the room code at once.
+        return;
+      }
+      startStallTimer();
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        attempt();
+      }, HOST_HANDOFF_GRACE_MS);
+    };
+
     // ---- data handlers ---------------------------------------------------
     const handleHostData = (conn: DataConnection, raw: unknown) => {
       if (!isPeerMessage(raw)) return;
@@ -438,6 +472,9 @@ export function useRoom({
         case 'room-closed':
           terminate('The host closed the room.');
           return;
+        case 'host-departing':
+          onHostDeparting();
+          return;
         case 'claim-host':
           void onGuestSawClaim(raw);
           return;
@@ -474,12 +511,22 @@ export function useRoom({
     // A returning preferred host, once connected as a guest to someone else's
     // room, asks for control back.
     const maybeSendClaim = () => {
-      if (claimSent || curRole !== 'guest' || !amPreferred || !hostKey || !state) return;
+      if (claimSent || curRole !== 'guest' || !amPreferred || !state) return;
       if (state.hostId === myPeerId) return; // already hosting (shouldn't happen as guest)
+      // A key-protected room can only be reclaimed by signing with the matching
+      // private key, so without it we can't prove identity — don't claim. A room
+      // created without crypto authenticates the takeover by handle match, so a
+      // returning preferred host that never had a keypair can (and must) still
+      // claim with sig: null.
+      const pref = effectivePreferred();
+      if (pref?.pubKey && !hostKey) return;
       claimSent = true;
       const epoch = state.migrationEpoch + 1;
       const nonce = randomNonce();
-      void signClaim(hostKey.privJwk, roomCode, epoch, nonce).then((sig) => {
+      const signed = hostKey
+        ? signClaim(hostKey.privJwk, roomCode, epoch, nonce)
+        : Promise.resolve<string | null>(null);
+      void signed.then((sig) => {
         if (disposed || !hostConn || !hostConn.open) return;
         hostConn.send({ type: 'claim-host', handle: myHandle, epoch, nonce, sig } satisfies PeerMessage);
       });
@@ -638,7 +685,14 @@ export function useRoom({
               hostId: roomCode,
               preferredHost: { handle: myHandle, pubKey: hostKey?.pubB64url ?? null },
               migrationEpoch: 0,
-              approvedHandles: storage.getHost()?.approvedHandles ?? {},
+              // Seed our own handle as approved so a temporary host that takes
+              // over recognises us on return — without it the preferred host is
+              // forced back through the join queue. Distributed in state, so the
+              // approval survives migration.
+              approvedHandles: {
+                ...(storage.getHost()?.approvedHandles ?? {}),
+                [myHandle]: nameRef.current,
+              },
             };
         state = seeded;
         approved = new Set(Object.keys(seeded.approvedHandles));
@@ -934,6 +988,7 @@ export function useRoom({
       nextComponent: () => broadcastSnapshot((prev) => game.nextComponent(prev)),
       newTicket: () => broadcastSnapshot((prev) => game.newTicket(prev)),
       closeRoom: () => {
+        roomClosed = true;
         const announce = (c: DataConnection) => {
           if (c.open) {
             try {
@@ -950,6 +1005,39 @@ export function useRoom({
         storage.clearHostKey(roomCode);
       },
     };
+
+    // ---- host-departure announcement (instant handoff) ------------------
+    // A plain tab/window close fires pagehide/beforeunload while the data
+    // channels are still briefly alive. If we're the host, use that window to
+    // tell guests we're leaving so they re-elect a new host immediately instead
+    // of waiting out the WebRTC connection timeout. A small message handed to an
+    // open data channel flushes synchronously, so it makes it out before the tab
+    // tears down. Best-effort: if it doesn't, guests still fall back to drop
+    // detection. Distinct from closeRoom(), which ends the room for good.
+    const announceDeparting = () => {
+      if (departed || roomClosed || curRole !== 'host') return;
+      departed = true;
+      const msg = { type: 'host-departing' } satisfies PeerMessage;
+      const send = (c: DataConnection) => {
+        if (c.open) {
+          try {
+            c.send(msg);
+          } catch {
+            /* best-effort: the tab is going away */
+          }
+        }
+      };
+      connections.forEach(send);
+      pendingConns.forEach(send);
+    };
+    // pagehide with persisted=true is a bfcache freeze that keeps the peer
+    // alive — don't announce then. (Open WebRTC connections usually disqualify
+    // bfcache anyway, but guard regardless.)
+    const onPageHide = (e: PageTransitionEvent) => {
+      if (!e.persisted) announceDeparting();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', announceDeparting);
 
     // ---- kickoff ---------------------------------------------------------
     amPreferred = intent === 'create';
@@ -974,6 +1062,8 @@ export function useRoom({
 
     return () => {
       disposed = true;
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', announceDeparting);
       clear(deferTimer);
       teardownPeer();
       apiRef.current = NOOP_API;

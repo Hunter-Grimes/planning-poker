@@ -122,6 +122,7 @@ export function isPeerMessage(raw: unknown): raw is PeerMessage {
     // --- host → client (unversioned control) -------------------------------
     case 'approved':
     case 'room-closed':
+    case 'host-departing':
       return true;
     case 'rejected':
       return typeof msg.reason === 'string';

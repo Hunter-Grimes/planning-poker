@@ -8,6 +8,8 @@ import { storage } from '../../src/lib/storage';
 
 // Mirror of the hook's RECONNECT_BASE_MS so a timer advance lands a retry.
 const RECONNECT_BASE_MS_GUESS = 2000;
+// Mirror of the hook's HOST_HANDOFF_GRACE_MS.
+const HOST_HANDOFF_GRACE_MS_GUESS = 600;
 
 vi.mock('peerjs', async () => {
   const mod = await import('../helpers/peerMock');
@@ -139,6 +141,21 @@ describe('useRoom — host role', () => {
     expect(a.sent).toContainEqual({ type: 'room-closed' } satisfies PeerMessage);
   });
 
+  it('announces host-departing to guests when the tab closes', () => {
+    const { result, peer } = openHost();
+    const a = join(result, peer, 'guest1', 'Alice', 'h-a');
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(a.sent).toContainEqual({ type: 'host-departing' } satisfies PeerMessage);
+  });
+
+  it('does not announce host-departing after an explicit closeRoom()', () => {
+    const { result, peer } = openHost();
+    const a = join(result, peer, 'guest1', 'Alice', 'h-a');
+    act(() => result.current.closeRoom());
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(a.sent).not.toContainEqual({ type: 'host-departing' } satisfies PeerMessage);
+  });
+
   it('auto-approves a returning handle from a restored host session', () => {
     storage.saveHost({ hostName: 'Host', roomCode: 'ROOM01', approvedHandles: { 'h-a': 'Alice' } });
     const { result, peer } = openHost();
@@ -149,6 +166,16 @@ describe('useRoom — host role', () => {
     // No manual approval needed.
     expect(result.current.pendingPlayers).toHaveLength(0);
     expect(conn.sent).toContainEqual({ type: 'approved' });
+  });
+
+  it('seeds its own handle as approved (and persists it) so a temp host re-approves it on return', () => {
+    const { result } = openHost();
+    const handle = storage.getRoomHandle('ROOM01');
+    // Distributed in broadcast state → a guest promoted to temporary host knows
+    // we're approved and won't force us back through the join queue.
+    expect(result.current.gameState!.approvedHandles[handle]).toBe('Host');
+    // Persisted → the approval survives a restart and rides into migration.
+    expect(storage.getHost()!.approvedHandles[handle]).toBe('Host');
   });
 });
 
@@ -263,6 +290,83 @@ describe('useRoom — migration', () => {
       act(() => vi.advanceTimersByTime(RECONNECT_BASE_MS_GUESS));
       const next = peerInstances[peerInstances.length - 1];
       expect(next.requestedId).toBeUndefined(); // reconnected as a guest, not host
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('claims the room code immediately when the host announces departure', () => {
+    const { conn } = connectedGuest([{ id: 'ROOM01', name: 'Host' }, { id: 'CLIENT01' }]);
+    // No timer advance: the lone surviving candidate becomes host at once.
+    act(() => conn.receive({ type: 'host-departing' } satisfies PeerMessage));
+    const claimant = peerInstances[peerInstances.length - 1];
+    expect(claimant.requestedId).toBe('ROOM01');
+  });
+
+  it('gives the winner a head start before a losing guest reconnects after departure', () => {
+    vi.useFakeTimers();
+    try {
+      // 'AAA' is the elected winner; CLIENT01 must wait, then rejoin as a guest.
+      const { conn } = connectedGuest([
+        { id: 'ROOM01', name: 'Host' },
+        { id: 'CLIENT01' },
+        { id: 'AAA' },
+      ]);
+      const before = peerInstances.length;
+      act(() => conn.receive({ type: 'host-departing' } satisfies PeerMessage));
+      // The loser doesn't spin up a peer immediately — it waits the head start.
+      expect(peerInstances.length).toBe(before);
+      act(() => vi.advanceTimersByTime(HOST_HANDOFF_GRACE_MS_GUESS));
+      const next = peerInstances[peerInstances.length - 1];
+      expect(next.requestedId).toBeUndefined(); // reconnected as a guest, not host
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The returning preferred host falls back to a guest (a temp host holds the
+  // room code), gets approved, then must ask for control back. Without crypto
+  // there's no keypair, so the takeover rides the handle-match path (sig: null).
+  it('reclaims as preferred host after migration with a keyless handle-match claim', async () => {
+    vi.useFakeTimers();
+    try {
+      storage.saveHost({ hostName: 'Host', roomCode: 'ROOM01', approvedHandles: {} });
+      const handle = storage.getRoomHandle('ROOM01');
+      renderHook(() => useRoom({ roomCode: 'ROOM01', playerName: 'Host', intent: 'create' }));
+
+      // First we race for the room code, but a temporary host holds it: exhaust
+      // the unavailable-id retries until we fall back to a guest peer.
+      for (let i = 0; i < 20 && lastPeer().requestedId === 'ROOM01'; i++) {
+        act(() => lastPeer().fireError({ type: 'unavailable-id' }));
+        act(() => vi.advanceTimersByTime(600));
+      }
+      const guestPeer = lastPeer();
+      expect(guestPeer.requestedId).toBeUndefined(); // failed over to a guest
+
+      act(() => guestPeer.fireOpen('CLIENT01'));
+      const conn = guestPeer.outgoing[0];
+      act(() => conn.fireOpen());
+      act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+
+      // Snapshot from the temporary host: it holds the room code, the epoch is
+      // bumped, and we are the pinned preferred host by handle (no pubKey).
+      const state = makeGameState({
+        hostId: 'ROOM01',
+        migrationEpoch: 1,
+        preferredHost: { handle, pubKey: null },
+        players: [makePlayer({ id: 'ROOM01', name: 'Temp' })],
+      });
+      await act(async () => {
+        conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage);
+      });
+
+      const claim = conn.sent.find((m) => (m as PeerMessage)?.type === 'claim-host') as
+        | Extract<PeerMessage, { type: 'claim-host' }>
+        | undefined;
+      expect(claim).toBeDefined();
+      expect(claim!.handle).toBe(handle);
+      expect(claim!.sig).toBeNull();
+      expect(claim!.epoch).toBe(2); // migrationEpoch + 1
     } finally {
       vi.useRealTimers();
     }

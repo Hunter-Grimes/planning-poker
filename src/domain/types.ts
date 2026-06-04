@@ -54,15 +54,17 @@ export interface GameState {
   components: Component[];
   activeComponentId: string | null;
   phase: GamePhase;
-  // The *current* host's peer id — may be the room code (preferred host) or a
-  // derived `${roomCode}-h${migrationEpoch}` id (a temporary host). Clients
-  // follow this, not the static room code.
+  // The *current* host's peer id — always the room code, since every host
+  // (preferred or temporary) claims `Peer(roomCode)`. Clients follow this
+  // rather than assuming the room code because the peer holding that id
+  // changes across migrations.
   hostId: string | null;
   // Who is allowed to reclaim the room as preferred host. Pinned by clients on
   // first sight (invite-link key or first snapshot) and not trusted to change.
   preferredHost: PreferredHost | null;
-  // Bumped on every host change; feeds the derived temp-host peer id so a fresh
-  // generation never collides with a dead host's lingering broker registration.
+  // Bumped on every host change; the monotonic epoch carried in the signed
+  // `claim-host` handoff so a stale claim (epoch <= last seen) is rejected as
+  // a replay.
   migrationEpoch: number;
   // Approved members as handle → name, distributed to every client so a player
   // promoted to host can auto-approve returning guests without re-verification.
@@ -117,9 +119,15 @@ export type PeerMessage =
   // --- host → client (unversioned control) ---------------------------------
   | { type: 'approved' }
   | { type: 'rejected'; reason: string }
-  // The host is shutting the room down (Close Room button, or tab/window close).
-  // Terminal for clients — they stop trying to reconnect.
+  // The host is shutting the room down for good (the Close Room button).
+  // Terminal for clients — they stop trying to reconnect. A plain tab/window
+  // close instead sends `host-departing`, which migrates the room rather than
+  // ending it.
   | { type: 'room-closed' }
+  // The host's tab/window is closing but the room should live on. Guests
+  // re-elect a new host immediately on receipt instead of waiting out the
+  // multi-second WebRTC connection timeout. Non-terminal (cf. `room-closed`).
+  | { type: 'host-departing' }
   // --- host → client (versioned state sync) --------------------------------
   // Full state — sent on join, on resync, and on structural transitions
   // (round/phase/component changes) where a delta would be fragile.
