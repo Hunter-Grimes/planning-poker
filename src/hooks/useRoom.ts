@@ -195,6 +195,11 @@ export function useRoom({
     const pendingData = new Map<string, PendingEntry>();
     const peerToHandle = new Map<string, string>();
     let approved: Set<string> = new Set();
+    // True while teardownPeer() is deliberately closing our own connections (a
+    // role change / step-down), so their synchronous 'close' handlers don't fire
+    // player-disconnected deltas that would corrupt the roster we keep showing
+    // until we re-sync as the new role.
+    let tearingDown = false;
 
     // guest runtime
     let hostConn: DataConnection | null = null;
@@ -548,6 +553,7 @@ export function useRoom({
     // ---- peer lifecycle --------------------------------------------------
     const teardownPeer = () => {
       stopTimers();
+      tearingDown = true;
       connections.forEach((c) => {
         try {
           c.close();
@@ -570,6 +576,7 @@ export function useRoom({
         }
       }
       peer = null;
+      tearingDown = false;
     };
 
     const scheduleReconnect = () => {
@@ -779,6 +786,10 @@ export function useRoom({
         handleHostData(conn, raw);
       });
       conn.on('close', () => {
+        // We're tearing our own peer down (role change). The maps get cleared
+        // wholesale and we'll re-sync in the new role — don't emit per-peer
+        // disconnect deltas against the state we're about to hand off.
+        if (tearingDown) return;
         if (pendingConns.get(conn.peer) === conn) {
           pendingConns.delete(conn.peer);
           pendingData.delete(conn.peer);
@@ -845,6 +856,19 @@ export function useRoom({
           attemptTimer = undefined;
           if (conn !== hostConn) return;
           synced = false;
+          // If we're the preferred host mid-reclaim, the temp host just yielded
+          // the room code (it relayed our claim, then tore down our link). Grab
+          // the code at once instead of waiting out a reconnect backoff: the
+          // longer the room code sits unheld, the more guests thrash trying to
+          // reach it and the more likely the temp host re-elects before we
+          // return. startHostClaim's own retries ride out the broker's TTL on
+          // the just-released id.
+          if (amPreferred && claimSent) {
+            stopStallTimer();
+            backoff = RECONNECT_BASE_MS;
+            attempt();
+            return;
+          }
           scheduleReconnect();
         });
         conn.on('error', () => {

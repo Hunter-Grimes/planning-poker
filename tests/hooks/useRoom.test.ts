@@ -268,6 +268,128 @@ describe('useRoom — migration', () => {
     return { result, peer, conn };
   }
 
+  // The active preferred host loses its network (NOT a reload): a temp host
+  // claims the room code, and when the original host's broker connection comes
+  // back its id is taken. It must ride the unavailable-id fallback down to a
+  // guest, claim control back, and — once the temp host yields the code —
+  // reclaim it and become host again. This is the path behind "the old host
+  // reconnects but never regains host controls".
+  it('reclaims host after a live network drop, temp-host takeover, and handoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Host', intent: 'create' }),
+      );
+      act(() => lastPeer().fireOpen('ROOM01')); // become the preferred host
+      expect(result.current.role).toBe('host');
+      const hostPeer = lastPeer();
+
+      // Network blip: PeerJS surfaces the lost socket as `network`, then the
+      // reconnect finds the id taken by the temp host (unavailable-id). Exhaust
+      // the retries so we fall back to a guest.
+      act(() => hostPeer.fireError({ type: 'network', message: 'Lost connection to server.' }));
+      expect(result.current.status).not.toBe('error');
+      for (let i = 0; i < 12 && lastPeer().requestedId === 'ROOM01'; i++) {
+        act(() => lastPeer().fireError({ type: 'unavailable-id' }));
+        act(() => vi.advanceTimersByTime(600));
+      }
+      const guestPeer = lastPeer();
+      expect(guestPeer.requestedId).toBeUndefined(); // failed over to a guest
+
+      act(() => guestPeer.fireOpen('HOST-GUEST'));
+      const conn = guestPeer.outgoing[0];
+      act(() => conn.fireOpen());
+      act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+
+      // Snapshot from the temp host: it holds the code, epoch bumped, we are the
+      // pinned preferred host (handle match, no crypto in tests).
+      const handle = storage.getRoomHandle('ROOM01');
+      const tempState = makeGameState({
+        hostId: 'ROOM01',
+        migrationEpoch: 1,
+        preferredHost: { handle, pubKey: null },
+        players: [makePlayer({ id: 'ROOM01', name: 'Temp' }), makePlayer({ id: 'HOST-GUEST', name: 'Host' })],
+      });
+      await act(async () => {
+        conn.receive({ type: 'snapshot', version: 1, state: tempState } satisfies PeerMessage);
+      });
+
+      const claim = conn.sent.find((m) => (m as PeerMessage)?.type === 'claim-host');
+      expect(claim).toBeDefined(); // asked for control back
+
+      // Temp host validated the claim and stepped down: our connection drops.
+      // We must grab the room code immediately — without waiting out a reconnect
+      // backoff — so the window where nobody holds the code stays tiny.
+      const before = peerInstances.length;
+      act(() => conn.fireClose());
+      expect(peerInstances.length).toBeGreaterThan(before);
+      const reclaimPeer = lastPeer();
+      expect(reclaimPeer.requestedId).toBe('ROOM01');
+      act(() => reclaimPeer.fireOpen('ROOM01'));
+
+      // …and have regained full host control.
+      expect(result.current.role).toBe('host');
+      expect(result.current.isPreferredHost).toBe(true);
+      expect(result.current.myId).toBe('ROOM01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // When the temp host yields to the returning preferred host it tears its own
+  // peer down. Those local connection closes must NOT be recorded as guests
+  // going offline, or the stepped-down host shows a stale roster that's missing
+  // the very player taking over ("the temp host doesn't see the old host").
+  it('does not drop the returning host from its roster when stepping down', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Temp', intent: 'join' }),
+      );
+      const peer0 = lastPeer();
+      act(() => peer0.fireOpen('CLIENT01'));
+      const link = peer0.outgoing[0];
+      act(() => link.fireOpen());
+      act(() => link.receive({ type: 'approved' } satisfies PeerMessage));
+      const snap = makeGameState({
+        hostId: 'ROOM01',
+        preferredHost: { handle: 'PREF', pubKey: null },
+        approvedHandles: { PREF: 'Pref' },
+        players: [makePlayer({ id: 'ROOM01', name: 'Old' }), makePlayer({ id: 'CLIENT01', name: 'Temp' })],
+      });
+      act(() => link.receive({ type: 'snapshot', version: 1, state: snap } satisfies PeerMessage));
+
+      // Old host drops → we win the election and become the temporary host.
+      act(() => link.fireClose());
+      act(() => vi.advanceTimersByTime(RECONNECT_BASE_MS_GUESS));
+      const tempPeer = lastPeer();
+      expect(tempPeer.requestedId).toBe('ROOM01');
+      act(() => tempPeer.fireOpen('ROOM01'));
+      expect(result.current.role).toBe('host');
+
+      // The returning preferred host re-joins (auto-approved by its pinned
+      // handle) and is in our roster…
+      const pref = new FakeConnection('PREFGUEST');
+      act(() => tempPeer.fireConnection(pref));
+      act(() => pref.fireOpen());
+      act(() => pref.receive({ type: 'request-join', name: 'Pref', handle: 'PREF' } satisfies PeerMessage));
+      expect(
+        result.current.gameState!.players.some((p) => p.id === 'PREFGUEST' && p.connected),
+      ).toBe(true);
+
+      // …then claims control. We accept and step down.
+      await act(async () => {
+        pref.receive({ type: 'claim-host', handle: 'PREF', epoch: 2, nonce: 'n', sig: null } satisfies PeerMessage);
+      });
+
+      // Our handed-off roster must still show the returning host as connected.
+      const prefPlayer = result.current.gameState!.players.find((p) => p.id === 'PREFGUEST');
+      expect(prefPlayer?.connected).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('claims the room code when the host drops and we are the election winner', () => {
     vi.useFakeTimers();
     try {
