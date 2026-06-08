@@ -55,6 +55,14 @@ describe('App — initial routing', () => {
     expect(screen.queryByText(/^room:/)).not.toBeInTheDocument();
   });
 
+  it('returns the preferred host to the host seat when the ?room= link is their own room', () => {
+    storage.saveHost({ hostName: 'Dana', roomCode: 'ABC234', approvedHandles: {} });
+    window.history.replaceState({}, '', '/?room=ABC234');
+    render(<App />);
+    // Their own invite link must not demote them to a guest (intent 'join').
+    expect(screen.getByText('room:create:ABC234:Dana')).toBeInTheDocument();
+  });
+
   it('clears orphaned components when restoring without a host session', () => {
     storage.saveComponents([makeComponent({ id: 's1' })]);
     storage.saveGuest({ roomCode: 'ABC234', playerName: 'Eve', persistentId: 'pid-2' });

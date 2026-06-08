@@ -61,8 +61,12 @@ const RECONNECT_MAX_MS = 30000;
 // the host slot itself, so a dead election winner can't strand the room.
 const ESCALATE_AFTER_ATTEMPTS = 3;
 // How long a verified takeover suppresses self-election so only the preferred
-// host reclaims the room code.
-const DEFER_ELECTION_MS = 8000;
+// host reclaims the room code. Must comfortably exceed the reclaim retry budget
+// in `startHostClaim` (its reclaiming MAX_UNAVAILABLE × UNAVAILABLE_RETRY_MS):
+// the temp host yields the code and defers for this long, and the returning host
+// needs that whole window to ride out the broker's TTL on the just-freed id and
+// grab it — else the temp host re-elects mid-reclaim and the handoff never lands.
+const DEFER_ELECTION_MS = 12000;
 // When the host announces it's closing its tab, guests re-elect at once. The
 // election winner claims the room code immediately; everyone else waits this
 // brief head start (and reconnects on this snappy cadence) so the new host has
@@ -618,12 +622,24 @@ export function useRoom({
       if (!disposed) setStatus('connecting');
       startStallTimer();
       let unavailableRetries = 0;
-      // Ride out the broker's short TTL on a just-released id (a returning
-      // preferred host reclaiming, an elected winner taking a freed code, or a
-      // StrictMode dev double-mount) before concluding someone else really holds
-      // it. ~3s of steady retries.
-      const MAX_UNAVAILABLE = 6;
+      // Ride out the broker's TTL on a just-released id before concluding that
+      // someone else really holds it. Two budgets, by why we're claiming:
+      //   - Reclaiming (we're the preferred host and our signed claim was
+      //     acknowledged): the temp host has yielded the code and is deferring
+      //     self-election for DEFER_ELECTION_MS, so for that whole window we're
+      //     the *only* peer racing for the freed id — and the public broker can
+      //     sit on it for several seconds after the temp host's peer is
+      //     destroyed. Keep trying until just shy of the defer window so we win
+      //     the instant it frees. Falling back to a guest here strands the room
+      //     headless until the temp host re-elects — exactly the "old host
+      //     reconnects but never regains control" bug.
+      //   - Fresh claim (initial create, an elected winner, or a StrictMode dev
+      //     double-mount): we only briefly probe a code someone else may
+      //     legitimately hold, then join them as a guest to do the signed
+      //     handshake. A short budget keeps that failover snappy.
+      const reclaiming = amPreferred && claimSent;
       const UNAVAILABLE_RETRY_MS = 500;
+      const MAX_UNAVAILABLE = reclaiming ? 20 : 6; // ~10s vs ~3s
 
       const build = () => {
         const p = new Peer(roomCode, getPeerConfig());

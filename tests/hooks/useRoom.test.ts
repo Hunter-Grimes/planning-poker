@@ -336,6 +336,69 @@ describe('useRoom — migration', () => {
     }
   });
 
+  // The temp host yields the room code, but the public broker sits on the
+  // just-freed id for several seconds before it can be re-registered. A
+  // reclaiming preferred host must keep racing for the code that whole time
+  // rather than give up after ~3s and fall back to a guest — which would leave
+  // the room headless and the crown stuck on the (departed) temp host. This is
+  // the core of "the old host reconnects but never regains control".
+  it('rides out a multi-second broker hold on the freed code while reclaiming', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Host', intent: 'create' }),
+      );
+      act(() => lastPeer().fireOpen('ROOM01'));
+      const hostPeer = lastPeer();
+
+      // Lose the socket; the reconnect finds the id taken by the temp host.
+      // Exhaust the (short, non-reclaim) retries to fail over to a guest.
+      act(() => hostPeer.fireError({ type: 'network', message: 'Lost connection to server.' }));
+      for (let i = 0; i < 12 && lastPeer().requestedId === 'ROOM01'; i++) {
+        act(() => lastPeer().fireError({ type: 'unavailable-id' }));
+        act(() => vi.advanceTimersByTime(600));
+      }
+      const guestPeer = lastPeer();
+      expect(guestPeer.requestedId).toBeUndefined();
+
+      act(() => guestPeer.fireOpen('HOST-GUEST'));
+      const conn = guestPeer.outgoing[0];
+      act(() => conn.fireOpen());
+      act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+
+      const handle = storage.getRoomHandle('ROOM01');
+      const tempState = makeGameState({
+        hostId: 'ROOM01',
+        migrationEpoch: 1,
+        preferredHost: { handle, pubKey: null },
+        players: [makePlayer({ id: 'ROOM01', name: 'Temp' }), makePlayer({ id: 'HOST-GUEST', name: 'Host' })],
+      });
+      await act(async () => {
+        conn.receive({ type: 'snapshot', version: 1, state: tempState } satisfies PeerMessage);
+      });
+      expect(conn.sent.find((m) => (m as PeerMessage)?.type === 'claim-host')).toBeDefined();
+
+      // Temp host steps down → our link drops and we start racing for the code.
+      // The broker keeps rejecting us with unavailable-id for ~4.5s. We must NOT
+      // fail over to a guest in the meantime: the reclaim peer stays on ROOM01.
+      act(() => conn.fireClose());
+      for (let i = 0; i < 9; i++) {
+        expect(lastPeer().requestedId).toBe('ROOM01'); // still reclaiming, not failed over
+        act(() => lastPeer().fireError({ type: 'unavailable-id' }));
+        act(() => vi.advanceTimersByTime(500));
+      }
+      // The id finally frees; we grab it and regain full host control.
+      expect(lastPeer().requestedId).toBe('ROOM01');
+      act(() => lastPeer().fireOpen('ROOM01'));
+
+      expect(result.current.role).toBe('host');
+      expect(result.current.isPreferredHost).toBe(true);
+      expect(result.current.myId).toBe('ROOM01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // When the temp host yields to the returning preferred host it tears its own
   // peer down. Those local connection closes must NOT be recorded as guests
   // going offline, or the stepped-down host shows a stale roster that's missing

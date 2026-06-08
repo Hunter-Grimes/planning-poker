@@ -31,12 +31,26 @@ function pinnedPubKeyFromHash(): string | null {
 function resolveInitialState(): AppState {
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
+  const hostSession = storage.getHost();
   if (room) {
+    // A returning preferred host who re-enters via a ?room= URL for the room
+    // they host (e.g. clicking their own invite link instead of reopening the
+    // bare app) must come back as the host — intent 'create' — not a guest.
+    // Routed as a guest they'd connect with intent 'join', never send a takeover
+    // claim, and sit powerless while a temp host keeps the crown.
+    if (hostSession && hostSession.roomCode === room) {
+      return {
+        screen: 'room',
+        roomCode: room,
+        playerName: hostSession.hostName,
+        intent: 'create',
+        pinnedPubKey: null,
+      };
+    }
     return { screen: 'join-form', roomId: room, pinnedPubKey: pinnedPubKeyFromHash() };
   }
 
   // Restore a host session → reclaim the room as the preferred host.
-  const hostSession = storage.getHost();
   if (hostSession) {
     return {
       screen: 'room',
