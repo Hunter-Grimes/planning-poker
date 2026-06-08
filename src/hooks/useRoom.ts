@@ -70,6 +70,19 @@ const DEFER_ELECTION_MS = 8000;
 // peer-unavailable retries against an id nobody holds yet.
 const HOST_HANDOFF_GRACE_MS = 600;
 const MIN_INTERVAL_MS = 50;
+// PeerJS error types that are recoverable: a dropped/closed broker socket or a
+// transient network error. PeerJS keeps the peer alive on these and our
+// `disconnected` handler reconnects, and P2P data channels survive a broker
+// blip — so tearing the room down (terminate) would strand a host that just
+// briefly lost the signaling server. Anything NOT listed here (bad id/key,
+// unsupported browser) is genuinely fatal and still terminates.
+const RECOVERABLE_PEER_ERRORS = new Set([
+  'network',
+  'disconnected',
+  'server-error',
+  'socket-error',
+  'socket-closed',
+]);
 
 interface ApiImpl {
   vote: (value: CardValue) => void;
@@ -611,6 +624,16 @@ export function useRoom({
         p.on('open', (id) => {
           if (disposed) return;
           myPeerId = id;
+          // A second `open` on a peer we're already hosting on is a broker
+          // reconnect after a transient drop — we still hold the room code and
+          // our P2P links survived. Resume; do NOT re-seed state (that would
+          // reset the round and mark still-connected guests as disconnected).
+          if (curRole === 'host' && state) {
+            backoff = RECONNECT_BASE_MS;
+            stopStallTimer();
+            if (!disposed) setStatus('connected');
+            return;
+          }
           becomeHost();
         });
         p.on('connection', (conn) => onHostConnection(conn));
@@ -635,6 +658,10 @@ export function useRoom({
             return;
           }
           if (type === 'peer-unavailable') return; // a specific peer; ignore
+          // Lost the signaling server, not the room: keep our live P2P links and
+          // let the `disconnected` handler reconnect. Don't strand the host on
+          // an error screen for a blip it will recover from on its own.
+          if (type && RECOVERABLE_PEER_ERRORS.has(type)) return;
           terminate(err.message);
         });
         p.on('disconnected', () => {
@@ -842,6 +869,10 @@ export function useRoom({
           scheduleReconnect();
           return;
         }
+        // A dropped signaling server is recoverable — our connection to the host
+        // is independent of the broker, and the `disconnected` handler
+        // reconnects. Don't surface a fatal error for a transient blip.
+        if (type && RECOVERABLE_PEER_ERRORS.has(type)) return;
         terminate(err.message);
       });
       p.on('disconnected', () => {

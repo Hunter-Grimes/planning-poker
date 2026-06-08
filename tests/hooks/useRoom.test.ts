@@ -372,3 +372,86 @@ describe('useRoom — migration', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('useRoom — connection resilience', () => {
+  beforeEach(() => {
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => (now += 100));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function openHost(): { result: HookResult; peer: FakePeer } {
+    const { result } = renderHook(() =>
+      useRoom({ roomCode: 'ROOM01', playerName: 'Host', intent: 'create' }),
+    );
+    const peer = lastPeer();
+    act(() => peer.fireOpen());
+    return { result, peer };
+  }
+
+  function joinGuest(peer: FakePeer, result: HookResult, id: string): FakeConnection {
+    const conn = new FakeConnection(id);
+    act(() => peer.fireConnection(conn));
+    act(() => conn.fireOpen());
+    act(() => conn.receive({ type: 'request-join', name: id, handle: `h-${id}` } satisfies PeerMessage));
+    act(() => result.current.approvePlayer(id));
+    return conn;
+  }
+
+  it('keeps hosting through a transient broker drop (network error is not fatal)', () => {
+    const { result, peer } = openHost();
+    expect(result.current.role).toBe('host');
+    // PeerJS surfaces a lost signaling socket as a `network` error.
+    act(() => peer.fireError({ type: 'network', message: 'Lost connection to server.' }));
+    expect(result.current.status).not.toBe('error');
+    expect(result.current.error).toBeNull();
+    expect(result.current.role).toBe('host');
+  });
+
+  it('resumes hosting on a broker reconnect without re-seeding the round', () => {
+    const { result, peer } = openHost();
+    joinGuest(peer, result, 'guest1');
+    act(() => result.current.reveal());
+    expect(result.current.gameState!.revealed).toBe(true);
+    const epochBefore = result.current.gameState!.migrationEpoch;
+
+    // Broker drops then reconnects: PeerJS re-fires `open` on the same peer.
+    act(() => peer.fireError({ type: 'network', message: 'Lost connection to server.' }));
+    act(() => peer.fireDisconnected());
+    act(() => peer.fireOpen()); // reconnected with the same room-code id
+
+    expect(result.current.status).toBe('connected');
+    expect(result.current.role).toBe('host');
+    // State survives: the reveal and the connected guest are intact, and the
+    // migration epoch did NOT bump (no destructive re-seed).
+    expect(result.current.gameState!.revealed).toBe(true);
+    expect(result.current.gameState!.migrationEpoch).toBe(epochBefore);
+    expect(
+      result.current.gameState!.players.find((p) => p.id === 'guest1')!.connected,
+    ).toBe(true);
+  });
+
+  it('does not fatally error a guest on a transient broker drop', () => {
+    const { result } = renderHook(() =>
+      useRoom({ roomCode: 'ROOM01', playerName: 'Guest', intent: 'join' }),
+    );
+    const peer = lastPeer();
+    act(() => peer.fireOpen('CLIENT01'));
+    const conn = peer.outgoing[0];
+    act(() => conn.fireOpen());
+    act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+    expect(result.current.status).toBe('connected');
+
+    act(() => peer.fireError({ type: 'network', message: 'Lost connection to server.' }));
+    expect(result.current.status).not.toBe('error');
+    expect(result.current.error).toBeNull();
+  });
+
+  it('still terminates on a genuinely fatal peer error', () => {
+    const { result, peer } = openHost();
+    act(() => peer.fireError({ type: 'browser-incompatible', message: 'no webrtc' }));
+    expect(result.current.status).toBe('error');
+  });
+});
