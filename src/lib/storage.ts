@@ -1,4 +1,4 @@
-import { Component } from '../domain/types';
+import { Component, PreferredHost } from '../domain/types';
 import type { HostKeypair } from './hostIdentity';
 import { randomId } from './id';
 
@@ -9,6 +9,11 @@ const AUTO_REVEAL_KEY = 'pp_auto_reveal';
 const CLIENT_ID_KEY = 'pp_client_id';
 // Per-room preferred-host keypair, namespaced by room code.
 const HOST_KEY_PREFIX = 'pp_host_key:';
+// Per-room preferred-host identity (handle + optional pubkey). Persisted by
+// *every* participant the first time they learn it, so that after everyone
+// closes their tabs and a guest restarts to become a temporary host, that temp
+// host still recognises — and yields to — the real creator when it returns.
+const PREFERRED_PREFIX = 'pp_preferred:';
 
 export interface HostSession {
   hostName: string;
@@ -126,5 +131,17 @@ export const storage = {
   },
   clearHostKey(roomCode: string): void {
     localStorage.removeItem(HOST_KEY_PREFIX + roomCode);
+  },
+  // Preferred-host identity, remembered per room by anyone who has seen it (the
+  // invite-link key or a snapshot). Lets a returning guest-turned-temp-host
+  // still verify the real creator's takeover after a full restart.
+  getPreferredHost(roomCode: string): PreferredHost | null {
+    return parseJSON<PreferredHost>(localStorage.getItem(PREFERRED_PREFIX + roomCode));
+  },
+  savePreferredHost(roomCode: string, pref: PreferredHost): void {
+    localStorage.setItem(PREFERRED_PREFIX + roomCode, JSON.stringify(pref));
+  },
+  clearPreferredHost(roomCode: string): void {
+    localStorage.removeItem(PREFERRED_PREFIX + roomCode);
   },
 };

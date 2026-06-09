@@ -10,6 +10,8 @@ import { storage } from '../../src/lib/storage';
 const RECONNECT_BASE_MS_GUESS = 2000;
 // Mirror of the hook's HOST_HANDOFF_GRACE_MS.
 const HOST_HANDOFF_GRACE_MS_GUESS = 600;
+// At least the hook's RECONNECT_MAX_MS — advancing this lands any backed-off retry.
+const RECONNECT_MAX_MS_GUESS = 30000;
 
 vi.mock('peerjs', async () => {
   const mod = await import('../helpers/peerMock');
@@ -552,6 +554,128 @@ describe('useRoom — migration', () => {
       expect(claim!.handle).toBe(handle);
       expect(claim!.sig).toBeNull();
       expect(claim!.epoch).toBe(2); // migrationEpoch + 1
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Everyone closed their tabs; a *guest* restarts into an empty room. With no
+  // snapshot to seed from it must still claim the code and host a lobby of just
+  // itself — previously this path crashed on null state, so the room never
+  // formed and nobody could host.
+  it('lets a guest with no prior state host an empty lobby (no crash on restart)', () => {
+    vi.useFakeTimers();
+    try {
+      // What any past participant would have remembered about the creator.
+      storage.savePreferredHost('ROOM01', { handle: 'PREF', pubKey: null });
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Guest', intent: 'join' }),
+      );
+      // The code is unheld: every connect fails. After escalation we claim it.
+      for (let i = 0; i < 8 && lastPeer().requestedId !== 'ROOM01'; i++) {
+        act(() => lastPeer().fireOpen(`G${i}`));
+        act(() => lastPeer().fireError({ type: 'peer-unavailable' }));
+        act(() => vi.advanceTimersByTime(RECONNECT_MAX_MS_GUESS));
+      }
+      const claimPeer = lastPeer();
+      expect(claimPeer.requestedId).toBe('ROOM01'); // escalated to host the code
+      act(() => claimPeer.fireOpen('ROOM01'));
+
+      expect(result.current.role).toBe('host');
+      expect(result.current.isPreferredHost).toBe(false); // only a temporary host
+      const gs = result.current.gameState!;
+      expect(gs.hostId).toBe('ROOM01');
+      expect(gs.players).toHaveLength(1);
+      expect(gs.players[0].name).toBe('Guest');
+      // It carried the remembered creator identity, so it can yield later.
+      expect(gs.preferredHost).toEqual({ handle: 'PREF', pubKey: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // …and that from-scratch temporary host must still hand back to the real
+  // creator when it returns: recognise it by its remembered handle (auto-approve
+  // so it isn't stranded in the join queue) and yield on its claim.
+  it('a from-scratch temporary host auto-approves and yields to the returning creator', async () => {
+    vi.useFakeTimers();
+    try {
+      storage.savePreferredHost('ROOM01', { handle: 'PREF', pubKey: null });
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Guest', intent: 'join' }),
+      );
+      for (let i = 0; i < 8 && lastPeer().requestedId !== 'ROOM01'; i++) {
+        act(() => lastPeer().fireOpen(`G${i}`));
+        act(() => lastPeer().fireError({ type: 'peer-unavailable' }));
+        act(() => vi.advanceTimersByTime(RECONNECT_MAX_MS_GUESS));
+      }
+      const tempPeer = lastPeer();
+      expect(tempPeer.requestedId).toBe('ROOM01');
+      act(() => tempPeer.fireOpen('ROOM01'));
+      expect(result.current.role).toBe('host');
+
+      // The creator connects with the preferred handle — auto-approved despite
+      // the temp host having no carried approvals, so it joins (not pending).
+      const pref = new FakeConnection('PREFGUEST');
+      act(() => tempPeer.fireConnection(pref));
+      act(() => pref.fireOpen());
+      act(() =>
+        pref.receive({ type: 'request-join', name: 'Creator', handle: 'PREF' } satisfies PeerMessage),
+      );
+      expect(pref.sent.some((m) => (m as PeerMessage)?.type === 'approved')).toBe(true);
+      expect(
+        result.current.gameState!.players.some((p) => p.id === 'PREFGUEST' && p.connected),
+      ).toBe(true);
+
+      // Its takeover claim (handle match, no crypto) is honoured: relay + step down.
+      const before = peerInstances.length;
+      await act(async () => {
+        pref.receive({ type: 'claim-host', handle: 'PREF', epoch: 1, nonce: 'n', sig: null } satisfies PeerMessage);
+      });
+      expect(pref.sent.some((m) => (m as PeerMessage)?.type === 'claim-host')).toBe(true);
+      expect(peerInstances.length).toBeGreaterThan(before); // tore down to rejoin as guest
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A returning creator who re-enters with join intent (e.g. via the invite
+  // link) must still be recognised as the preferred host and ask for control
+  // back — a saved host session for the room is enough, no create intent needed.
+  it('treats a returning creator as preferred host even with join intent', async () => {
+    vi.useFakeTimers();
+    try {
+      storage.saveHost({ hostName: 'Host', roomCode: 'ROOM01', approvedHandles: {} });
+      const handle = storage.getRoomHandle('ROOM01');
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Host', intent: 'join' }),
+      );
+      // We pursue the code first (preferred), but a temp host holds it → guest.
+      for (let i = 0; i < 12 && lastPeer().requestedId === 'ROOM01'; i++) {
+        act(() => lastPeer().fireError({ type: 'unavailable-id' }));
+        act(() => vi.advanceTimersByTime(600));
+      }
+      const guestPeer = lastPeer();
+      expect(guestPeer.requestedId).toBeUndefined();
+      act(() => guestPeer.fireOpen('CLIENT01'));
+      const conn = guestPeer.outgoing[0];
+      act(() => conn.fireOpen());
+      act(() => conn.receive({ type: 'approved' } satisfies PeerMessage));
+      const state = makeGameState({
+        hostId: 'ROOM01',
+        migrationEpoch: 1,
+        preferredHost: { handle, pubKey: null },
+        players: [makePlayer({ id: 'ROOM01', name: 'Temp' })],
+      });
+      await act(async () => {
+        conn.receive({ type: 'snapshot', version: 1, state } satisfies PeerMessage);
+      });
+      const claim = conn.sent.find((m) => (m as PeerMessage)?.type === 'claim-host') as
+        | Extract<PeerMessage, { type: 'claim-host' }>
+        | undefined;
+      expect(claim).toBeDefined();
+      expect(claim!.handle).toBe(handle);
+      expect(result.current.isPreferredHost).toBe(false); // still reclaiming, not host yet
     } finally {
       vi.useRealTimers();
     }

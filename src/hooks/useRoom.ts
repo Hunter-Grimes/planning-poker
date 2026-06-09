@@ -182,12 +182,20 @@ export function useRoom({
     };
     const myHandle = storage.getRoomHandle(roomCode);
     let hostKey = storage.getHostKey(roomCode); // preferred-host keypair (creator only)
-    // We are the preferred host iff we created/hold this room's keypair.
-    let amPreferred = intent === 'create';
-    // Pinned preferred-host identity (link fragment first, else first snapshot).
+    // We are the preferred host iff we created this room. Detected robustly so a
+    // returning creator is recognised however they re-enter: by intent, by still
+    // holding the room's keypair, or by a saved host session for this exact room.
+    // Without this, a creator who reconnects via an invite link (intent 'join')
+    // would be a permanent guest and never reclaim.
+    const isPreferred = () =>
+      intent === 'create' || hostKey !== null || storage.getHost()?.roomCode === roomCode;
+    let amPreferred = isPreferred();
+    // Pinned preferred-host identity: invite-link fragment first, then whatever
+    // we persisted on a prior visit (survives a full restart), else learned from
+    // the first snapshot (trust-on-first-use).
     let pinnedPreferred: PreferredHost | null = pinnedPubKey
       ? { handle: '', pubKey: pinnedPubKey }
-      : null;
+      : storage.getPreferredHost(roomCode);
 
     // Authoritative (host) or last-known (guest) state.
     let state: GameState | null = null;
@@ -433,7 +441,13 @@ export function useRoom({
           }
           return;
         }
-        if (approved.has(handle)) {
+        // Auto-approve previously-approved handles, and always the preferred
+        // host — recognised by its known handle even on a temp host that started
+        // from scratch (no carried approvals). Without this the returning creator
+        // is stuck in the join queue, never gets a snapshot, and so never sends
+        // its takeover claim.
+        const prefHandle = effectivePreferred()?.handle;
+        if (approved.has(handle) || (handle !== '' && handle === prefHandle)) {
           doApprove(conn, peerId, handle, name);
           return;
         }
@@ -504,9 +518,12 @@ export function useRoom({
           version = raw.version;
           synced = true;
           state = raw.state;
-          // Pin the preferred host the first time we learn it (trust-on-first-use).
-          if (!pinnedPreferred && raw.state.preferredHost) {
-            pinnedPreferred = raw.state.preferredHost;
+          // Pin the preferred host the first time we learn it (trust-on-first-use)
+          // and remember it across restarts, so if we later become a temporary
+          // host we can still verify and yield to the real creator's return.
+          if (raw.state.preferredHost) {
+            if (!pinnedPreferred) pinnedPreferred = raw.state.preferredHost;
+            storage.savePreferredHost(roomCode, raw.state.preferredHost);
           }
           if (!disposed) setGameState(raw.state);
           maybeSendClaim();
@@ -598,14 +615,24 @@ export function useRoom({
 
     // Decide whether THIS peer should claim the host slot on the next attempt.
     const shouldClaimHost = (): boolean => {
-      if (deferElection && !amPreferred) return false;
-      if (amPreferred && claimSent) return true; // reclaiming after handoff
+      if (amPreferred) {
+        // The preferred host always (re)takes the room. If a reachable temp host
+        // holds the code we grab it anyway — that collides to unavailable-id and
+        // we fall through to the guest handshake, which makes the temp host step
+        // down. If the code is headless we take it immediately rather than
+        // waiting out the ordinary escalation delay. There is no time limit:
+        // however long we've been gone, returning means reclaiming.
+        return true;
+      }
+      if (deferElection) return false;
+      // Escalation: nobody is reachable on the room code and we've waited — claim
+      // it so a dead election winner (or an empty room everyone restarted into)
+      // can't strand things. Checked before the no-state case so a guest that
+      // restarted with no snapshot can still become a temporary host.
+      if (failedAttempts >= ESCALATE_AFTER_ATTEMPTS) return true;
       if (!state) return intent === 'create';
       const winner = game.electHost(state);
-      if (winner && myPeerId && winner.id === myPeerId) return true;
-      // Escalation: nobody reachable on the room code and we've waited — race
-      // for it so a dead election winner can't strand the room.
-      return failedAttempts >= ESCALATE_AFTER_ATTEMPTS;
+      return !!(winner && myPeerId && winner.id === myPeerId);
     };
 
     const attempt = () => {
@@ -707,70 +734,70 @@ export function useRoom({
       claimSent = false;
       version = state ? version : 0;
 
+      // Carry forward last-known state if we have it; otherwise seed a fresh
+      // lobby from scratch. The fresh path is what lets *any* peer restart into
+      // an empty room and host a lobby of just themselves — including a former
+      // guest with no carried state (previously this branch crashed on null).
+      const carried = state;
+      const components: Component[] = carried?.components ?? storage.getComponents();
+      const firstVotable = components.find((s) => s.enabled && s.average === null);
+
+      // Preferred-host identity to stamp into the room: our own when we *are* the
+      // creator, otherwise the best identity we know (link / persisted / carried)
+      // so a temporary host still recognises and yields to the real creator.
+      const preferredHost: PreferredHost | null = amPreferred
+        ? { handle: myHandle, pubKey: hostKey?.pubB64url ?? null }
+        : effectivePreferred();
+
+      // Approvals: a preferred host always seeds its own handle (so a temp host
+      // recognises it on return) and merges any persisted approvals; a temp host
+      // carries whatever it last knew.
+      const approvedHandles: Record<string, string> = amPreferred
+        ? {
+            ...(carried?.approvedHandles ?? storage.getHost()?.approvedHandles ?? {}),
+            [myHandle]: nameRef.current,
+          }
+        : (carried?.approvedHandles ?? {});
+
+      const others = (carried?.players ?? [])
+        .filter((p) => p.id !== roomCode && p.id !== myGuestId)
+        .map((p) => ({ ...p, vote: null, active: false, connected: false }));
+      const seeded: GameState = {
+        players: [
+          ...others,
+          { id: roomCode, name: nameRef.current, vote: null, active: false, connected: true },
+        ],
+        revealed: false,
+        round: carried?.round ?? 1,
+        components,
+        activeComponentId: carried?.activeComponentId ?? firstVotable?.id ?? null,
+        phase: carried?.phase ?? 'voting',
+        hostId: roomCode,
+        preferredHost,
+        // Bump the epoch on a real migration (we had prior state); start at 0 for
+        // a brand-new room so the first claim's `epoch + 1` is well-defined.
+        migrationEpoch: (carried?.migrationEpoch ?? 0) + (carried ? 1 : 0),
+        approvedHandles,
+      };
+      state = seeded;
+      approved = new Set(Object.keys(seeded.approvedHandles));
+      if (!disposed) setGameState(seeded);
+
+      // Remember the preferred-host identity so it survives a restart — this is
+      // what lets a returning guest-turned-temp-host verify the real creator's
+      // takeover after everyone has closed their tabs. Skip a content-free
+      // placeholder so we never clobber a real handle we already persisted.
+      if (preferredHost && (preferredHost.handle || preferredHost.pubKey)) {
+        storage.savePreferredHost(roomCode, preferredHost);
+      }
+      // The preferred host also persists a host session so a tab close
+      // auto-restarts this room as the creator.
       if (amPreferred) {
-        // Fresh-or-restored preferred host on the room code.
-        const components: Component[] = state?.components ?? storage.getComponents();
-        const firstVotable = components.find((s) => s.enabled && s.average === null);
-        const carried = state;
-        const seeded: GameState = carried
-          ? {
-              ...carried,
-              hostId: roomCode,
-              migrationEpoch: carried.migrationEpoch + 1,
-              revealed: false,
-              players: carried.players
-                .filter((p) => p.id !== roomCode && p.id !== myGuestId)
-                .map((p) => ({ ...p, vote: null, active: false, connected: false }))
-                .concat([
-                  { id: roomCode, name: nameRef.current, vote: null, active: false, connected: true },
-                ]),
-            }
-          : {
-              players: [{ id: roomCode, name: nameRef.current, vote: null, connected: true }],
-              revealed: false,
-              round: 1,
-              components,
-              activeComponentId: firstVotable?.id ?? null,
-              phase: 'voting',
-              hostId: roomCode,
-              preferredHost: { handle: myHandle, pubKey: hostKey?.pubB64url ?? null },
-              migrationEpoch: 0,
-              // Seed our own handle as approved so a temporary host that takes
-              // over recognises us on return — without it the preferred host is
-              // forced back through the join queue. Distributed in state, so the
-              // approval survives migration.
-              approvedHandles: {
-                ...(storage.getHost()?.approvedHandles ?? {}),
-                [myHandle]: nameRef.current,
-              },
-            };
-        state = seeded;
-        approved = new Set(Object.keys(seeded.approvedHandles));
-        if (!disposed) setGameState(seeded);
-        // Persist a host session so a tab close auto-restarts this room.
         storage.saveHost({
           hostName: nameRef.current,
           roomCode,
           approvedHandles: seeded.approvedHandles,
         });
-      } else {
-        // Promoted temporary host: seed from last-known state, restart round.
-        const base = state as GameState;
-        const seeded: GameState = {
-          ...base,
-          hostId: roomCode,
-          migrationEpoch: base.migrationEpoch + 1,
-          revealed: false,
-          players: base.players
-            .filter((p) => p.id !== roomCode && p.id !== myGuestId)
-            .map((p) => ({ ...p, vote: null, active: false, connected: false }))
-            .concat([
-              { id: roomCode, name: nameRef.current, vote: null, active: false, connected: true },
-            ]),
-        };
-        state = seeded;
-        approved = new Set(Object.keys(seeded.approvedHandles));
-        if (!disposed) setGameState(seeded);
       }
 
       setCurRole('host');
@@ -1074,6 +1101,7 @@ export function useRoom({
         storage.clearHost();
         storage.clearComponents();
         storage.clearHostKey(roomCode);
+        storage.clearPreferredHost(roomCode);
       },
     };
 
@@ -1111,7 +1139,7 @@ export function useRoom({
     window.addEventListener('beforeunload', announceDeparting);
 
     // ---- kickoff ---------------------------------------------------------
-    amPreferred = intent === 'create';
+    amPreferred = isPreferred();
     const startSession = () => {
       if (!disposed) attempt();
     };
