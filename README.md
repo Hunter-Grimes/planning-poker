@@ -138,6 +138,26 @@ and watch the browser console — a stuck `iceConnectionState` of `checking` or 
 `failed` state means the network is blocking peer-to-peer traffic (common with
 Wi-Fi "client isolation" / guest networks), which is what TURN is for.
 
+### Diagnosing the room lifecycle (host migration / reconnection)
+
+For bugs in the rotating-host logic itself (a host that returns and doesn't
+regain control, a stuck handoff), turn on the app-level event log. It captures
+every role change, peer event, and step in the takeover/handoff protocol into an
+in-memory ring buffer per browser — there's no backend to collect logs centrally.
+
+Enable it without rebuilding, even on the deployed site, from DevTools:
+
+```js
+__PP_LOG.enable(); location.reload();   // start capturing from page load
+// …reproduce the issue…
+copy(__PP_LOG.text());                  // copy the transcript (or use the
+                                        // "Copy debug log" link in the room)
+```
+
+Do this in **every** participant's browser and compare the transcripts — the
+event timestamps line up across tabs/windows on one machine. `__PP_LOG.disable()`
+turns it off. A build-time `VITE_PP_DEBUG=1` enables it everywhere by default.
+
 ## Deployment
 
 The app is a static bundle. `npm run build` emits to `dist/`. It is configured

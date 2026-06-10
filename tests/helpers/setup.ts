@@ -4,7 +4,9 @@ import { afterEach, vi } from 'vitest';
 
 // jsdom doesn't implement matchMedia, which useTheme relies on. Provide a inert
 // stub (reports light mode, no-op listeners) so components render in tests.
-if (!window.matchMedia) {
+// Guarded for the rare `// @vitest-environment node` test (e.g. real-crypto
+// round-trips that can't run under jsdom's realm), which has no `window`.
+if (typeof window !== 'undefined' && !window.matchMedia) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,
     media: query,

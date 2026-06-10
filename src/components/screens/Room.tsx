@@ -22,6 +22,7 @@ import { CardValue, playerHasVoted } from '../../domain/types';
 import { nextComponentAfterActive } from '../../domain/gameLogic';
 import { cn } from '../../lib/cn';
 import { storage } from '../../lib/storage';
+import { logEnabled, ppLog } from '../../lib/logger';
 
 interface Props {
   roomCode: string;
@@ -62,6 +63,7 @@ export function Room({ roomCode, playerName, intent, pinnedPubKey, onExit }: Pro
   const isHost = role === 'host';
 
   const [copied, setCopied] = useState(false);
+  const [debugCopied, setDebugCopied] = useState(false);
   const [autoReveal, setAutoReveal] = useState(() => storage.getAutoReveal());
   const [backlogOpen, setBacklogOpen] = useState(false);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -397,6 +399,29 @@ export function Room({ roomCode, playerName, intent, pinnedPubKey, onExit }: Pro
               New Ticket
             </Button>
           )}
+        </div>
+      )}
+
+      {logEnabled() && (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() => {
+              const text = ppLog.text();
+              try {
+                navigator.clipboard?.writeText(text);
+              } catch {
+                /* fall through — also dumped to console below */
+              }
+              console.log(text);
+              setDebugCopied(true);
+              setTimeout(() => setDebugCopied(false), 2000);
+            }}
+            className="text-xs text-gray-400 dark:text-gray-600 underline underline-offset-2 hover:text-gray-600 dark:hover:text-gray-400"
+            title="Diagnostic logging is on. Copy the event log to share for debugging."
+          >
+            {debugCopied ? 'Debug log copied ✓' : 'Copy debug log'}
+          </button>
         </div>
       )}
     </RoomScreen>

@@ -11,6 +11,10 @@ interface ImportMetaEnv {
   readonly VITE_TURN_CREDENTIAL?: string;
   // PeerJS log verbosity (0–3). See src/peerConfig.ts.
   readonly VITE_PEER_DEBUG?: string;
+  // App-level diagnostic logging for the room lifecycle (any truthy value turns
+  // it on at build time). At runtime it can also be toggled without a rebuild via
+  // `localStorage.pp_debug = '1'` or `__PP_LOG.enable()`. See src/lib/logger.ts.
+  readonly VITE_PP_DEBUG?: string;
 }
 
 interface ImportMeta {

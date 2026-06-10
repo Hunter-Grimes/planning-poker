@@ -18,6 +18,7 @@ import { applyDelta } from '../domain/gameLogic';
 import { getPeerConfig } from '../lib/peerConfig';
 import { storage } from '../lib/storage';
 import { createHostKeypair, cryptoAvailable, randomNonce, signClaim, verifyClaim } from '../lib/hostIdentity';
+import { log as ppLogEvent } from '../lib/logger';
 
 export type ConnectionStatus = 'connecting' | 'pending' | 'connected' | 'disconnected' | 'error';
 export type RoomRole = 'electing' | 'host' | 'guest';
@@ -177,8 +178,10 @@ export function useRoom({
     // Effect-local mirror of `role` (the useState closure is frozen at 'electing').
     let curRole: RoomRole = 'electing';
     const setCurRole = (r: RoomRole) => {
+      const prev = curRole;
       curRole = r;
       if (!disposed) setRole(r);
+      if (prev !== r) dlog('role', { from: prev, to: r });
     };
     const myHandle = storage.getRoomHandle(roomCode);
     let hostKey = storage.getHostKey(roomCode); // preferred-host keypair (creator only)
@@ -231,6 +234,28 @@ export function useRoom({
     // after an explicit closeRoom() (which sends the terminal `room-closed`).
     let departed = false;
     let roomClosed = false;
+
+    // Short id distinguishing this hook instance in the logs (e.g. StrictMode's
+    // double-mount, or before we have a peer id). Diagnostic only.
+    const SID = Math.random().toString(36).slice(2, 6);
+    // Emit a diagnostic event stamped with the current room state. No-op unless
+    // debug logging is enabled (see lib/logger.ts). This is how we trace a "host
+    // returns but the room is dead" report from the field.
+    const dlog = (event: string, extra?: Record<string, unknown>) =>
+      ppLogEvent('room', event, {
+        sid: SID,
+        role: curRole,
+        pref: amPreferred,
+        claimSent,
+        me: myPeerId,
+        host: state ? state.hostId : null,
+        epoch: state ? state.migrationEpoch : undefined,
+        conns: connections.size,
+        failed: failedAttempts,
+        defer: deferElection,
+        lastClaim: lastClaimEpoch,
+        ...extra,
+      });
 
     const clear = (t: ReturnType<typeof setTimeout> | undefined) => {
       if (t !== undefined) clearTimeout(t);
@@ -344,15 +369,37 @@ export function useRoom({
       msg: Extract<PeerMessage, { type: 'claim-host' }>,
     ): Promise<{ ok: boolean; verified: boolean }> => {
       const pref = effectivePreferred();
-      if (!pref) return { ok: false, verified: false };
-      if (msg.epoch <= lastClaimEpoch) return { ok: false, verified: false };
+      if (!pref) {
+        dlog('claim:reject', { reason: 'no-preferred-known', epoch: msg.epoch });
+        return { ok: false, verified: false };
+      }
+      if (msg.epoch <= lastClaimEpoch) {
+        dlog('claim:reject', { reason: 'stale-epoch', epoch: msg.epoch, lastClaim: lastClaimEpoch });
+        return { ok: false, verified: false };
+      }
       if (pref.pubKey) {
-        if (!msg.sig) return { ok: false, verified: false };
+        if (!msg.sig) {
+          dlog('claim:reject', { reason: 'no-sig', epoch: msg.epoch });
+          return { ok: false, verified: false };
+        }
         const ok = await verifyClaim(pref.pubKey, msg.sig, roomCode, msg.epoch, msg.nonce);
+        dlog(ok ? 'claim:verify-ok' : 'claim:reject', {
+          reason: ok ? undefined : 'verify-false',
+          epoch: msg.epoch,
+          claimHandle: msg.handle,
+          prefHandle: pref.handle,
+        });
         return { ok, verified: ok };
       }
       // Degraded: no pinned key — accept a handle match but flag it.
-      return { ok: msg.handle === pref.handle, verified: false };
+      const ok = msg.handle === pref.handle;
+      dlog(ok ? 'claim:handle-ok' : 'claim:reject', {
+        reason: ok ? undefined : 'handle-mismatch',
+        epoch: msg.epoch,
+        claimHandle: msg.handle,
+        prefHandle: pref.handle,
+      });
+      return { ok, verified: false };
     };
 
     const beginDefer = () => {
@@ -366,7 +413,11 @@ export function useRoom({
     // Host received a takeover claim: if valid, relay it so peers defer, then
     // step down to a guest so the preferred host can reclaim the room code.
     const onHostReceivedClaim = async (msg: Extract<PeerMessage, { type: 'claim-host' }>) => {
-      if (curRole !== 'host' || amPreferred) return;
+      dlog('claim:host-recv', { epoch: msg.epoch, claimHandle: msg.handle, hasSig: !!msg.sig });
+      if (curRole !== 'host' || amPreferred) {
+        dlog('claim:host-ignore', { reason: curRole !== 'host' ? 'not-host' : 'am-preferred' });
+        return;
+      }
       const { ok, verified } = await validateClaim(msg);
       if (disposed || !ok) return;
       lastClaimEpoch = msg.epoch;
@@ -376,6 +427,7 @@ export function useRoom({
       connections.forEach((conn) => {
         if (conn.open) conn.send(msg);
       });
+      dlog('claim:stepdown', { epoch: msg.epoch, verified, relayedTo: connections.size });
       beginDefer();
       // Yield: tear down the host peer and rejoin as a guest pointing at the
       // room code, where the preferred host will appear.
@@ -390,6 +442,7 @@ export function useRoom({
       if (disposed || !ok) return;
       lastClaimEpoch = msg.epoch;
       if (!verified) setMigrationNotice('Host changed — verify this is expected.');
+      dlog('claim:guest-defer', { epoch: msg.epoch });
       beginDefer();
     };
 
@@ -406,6 +459,7 @@ export function useRoom({
       // Snappy reconnect cadence for the brief handoff window.
       backoff = HOST_HANDOFF_GRACE_MS;
       const winner = state ? game.electHost(state) : null;
+      dlog('host-departing', { winner: winner?.id ?? null, iWin: !!(winner && winner.id === myPeerId) });
       if (winner && myPeerId && winner.id === myPeerId) {
         attempt(); // I'm the new host — claim the room code at once.
         return;
@@ -447,10 +501,13 @@ export function useRoom({
         // is stuck in the join queue, never gets a snapshot, and so never sends
         // its takeover claim.
         const prefHandle = effectivePreferred()?.handle;
-        if (approved.has(handle) || (handle !== '' && handle === prefHandle)) {
+        const isPref = handle !== '' && handle === prefHandle;
+        if (approved.has(handle) || isPref) {
+          dlog('join:approve', { handle, name, viaPreferred: isPref && !approved.has(handle) });
           doApprove(conn, peerId, handle, name);
           return;
         }
+        dlog('join:pending', { handle, name, prefHandle });
         const entry: PendingEntry = { id: peerId, name, persistentId: handle };
         pendingConns.set(peerId, conn);
         pendingData.set(peerId, entry);
@@ -525,6 +582,14 @@ export function useRoom({
             if (!pinnedPreferred) pinnedPreferred = raw.state.preferredHost;
             storage.savePreferredHost(roomCode, raw.state.preferredHost);
           }
+          dlog('snapshot', {
+            v: raw.version,
+            host: raw.state.hostId,
+            epoch: raw.state.migrationEpoch,
+            prefHandle: raw.state.preferredHost?.handle,
+            prefHasKey: !!raw.state.preferredHost?.pubKey,
+            players: raw.state.players.length,
+          });
           if (!disposed) setGameState(raw.state);
           maybeSendClaim();
           return;
@@ -550,29 +615,55 @@ export function useRoom({
     // A returning preferred host, once connected as a guest to someone else's
     // room, asks for control back.
     const maybeSendClaim = () => {
-      if (claimSent || curRole !== 'guest' || !amPreferred || !state) return;
-      if (state.hostId === myPeerId) return; // already hosting (shouldn't happen as guest)
+      if (claimSent || curRole !== 'guest' || !amPreferred || !state) {
+        dlog('claim:skip', {
+          reason: claimSent
+            ? 'already-sent'
+            : curRole !== 'guest'
+              ? 'not-guest'
+              : !amPreferred
+                ? 'not-preferred'
+                : 'no-state',
+        });
+        return;
+      }
+      if (state.hostId === myPeerId) {
+        dlog('claim:skip', { reason: 'already-host' });
+        return; // already hosting (shouldn't happen as guest)
+      }
       // A key-protected room can only be reclaimed by signing with the matching
       // private key, so without it we can't prove identity — don't claim. A room
       // created without crypto authenticates the takeover by handle match, so a
       // returning preferred host that never had a keypair can (and must) still
       // claim with sig: null.
       const pref = effectivePreferred();
-      if (pref?.pubKey && !hostKey) return;
+      if (pref?.pubKey && !hostKey) {
+        dlog('claim:skip', { reason: 'no-hostkey-for-keyed-room', hasCrypto: cryptoAvailable() });
+        return;
+      }
       claimSent = true;
       const epoch = state.migrationEpoch + 1;
       const nonce = randomNonce();
+      dlog('claim:send-begin', { epoch, willSign: !!hostKey, hasPubKey: !!pref?.pubKey });
       const signed = hostKey
         ? signClaim(hostKey.privJwk, roomCode, epoch, nonce)
         : Promise.resolve<string | null>(null);
-      void signed.then((sig) => {
-        if (disposed || !hostConn || !hostConn.open) return;
-        hostConn.send({ type: 'claim-host', handle: myHandle, epoch, nonce, sig } satisfies PeerMessage);
-      });
+      void signed
+        .then((sig) => {
+          if (hostKey && !sig) dlog('claim:sign-null', { epoch }); // signing unexpectedly failed
+          if (disposed || !hostConn || !hostConn.open) {
+            dlog('claim:send-abort', { epoch, disposed, hostConnOpen: !!hostConn?.open });
+            return;
+          }
+          hostConn.send({ type: 'claim-host', handle: myHandle, epoch, nonce, sig } satisfies PeerMessage);
+          dlog('claim:sent', { epoch, hasSig: !!sig });
+        })
+        .catch((e) => dlog('claim:sign-error', { epoch, error: String(e) }));
     };
 
     // ---- peer lifecycle --------------------------------------------------
     const teardownPeer = () => {
+      if (peer || connections.size) dlog('teardown', { conns: connections.size, hadPeer: !!peer });
       stopTimers();
       tearingDown = true;
       connections.forEach((c) => {
@@ -638,7 +729,9 @@ export function useRoom({
     const attempt = () => {
       if (disposed) return;
       teardownPeer();
-      if (shouldClaimHost()) startHostClaim();
+      const claim = shouldClaimHost();
+      dlog('attempt', { willClaim: claim });
+      if (claim) startHostClaim();
       else startGuest();
     };
 
@@ -679,11 +772,13 @@ export function useRoom({
           // our P2P links survived. Resume; do NOT re-seed state (that would
           // reset the round and mark still-connected guests as disconnected).
           if (curRole === 'host' && state) {
+            dlog('host:peer-reopen', { id });
             backoff = RECONNECT_BASE_MS;
             stopStallTimer();
             if (!disposed) setStatus('connected');
             return;
           }
+          dlog('host:peer-open', { id });
           becomeHost();
         });
         p.on('connection', (conn) => onHostConnection(conn));
@@ -698,10 +793,12 @@ export function useRoom({
             if (peer === p) peer = null;
             if (unavailableRetries < MAX_UNAVAILABLE) {
               unavailableRetries++;
+              dlog('host:unavailable-id', { retry: unavailableRetries, max: MAX_UNAVAILABLE, reclaiming });
               setTimeout(build, UNAVAILABLE_RETRY_MS);
               return;
             }
             // Someone else holds the room code — join them as a guest instead.
+            dlog('host:claim-giveup', { reclaiming, afterRetries: unavailableRetries });
             claimSent = false;
             teardownPeer();
             startGuest();
@@ -711,7 +808,11 @@ export function useRoom({
           // Lost the signaling server, not the room: keep our live P2P links and
           // let the `disconnected` handler reconnect. Don't strand the host on
           // an error screen for a blip it will recover from on its own.
-          if (type && RECOVERABLE_PEER_ERRORS.has(type)) return;
+          if (type && RECOVERABLE_PEER_ERRORS.has(type)) {
+            dlog('host:peer-error-recoverable', { type });
+            return;
+          }
+          dlog('host:peer-error-fatal', { type, msg: err.message });
           terminate(err.message);
         });
         p.on('disconnected', () => {
@@ -800,6 +901,14 @@ export function useRoom({
         });
       }
 
+      dlog('becomeHost', {
+        kind: amPreferred ? 'preferred' : 'temp',
+        fromCarried: !!carried,
+        epoch: seeded.migrationEpoch,
+        players: seeded.players.length,
+        prefHandle: preferredHost?.handle,
+        approvedCount: Object.keys(approvedHandles).length,
+      });
       setCurRole('host');
       if (!disposed) {
         setMyId(roomCode);
@@ -840,6 +949,7 @@ export function useRoom({
           return;
         }
         if (connections.get(conn.peer) !== conn) return;
+        dlog('host:guest-drop', { peer: conn.peer, remaining: connections.size - 1 });
         connections.delete(conn.peer);
         peerToHandle.delete(conn.peer);
         emitDelta(
@@ -864,6 +974,7 @@ export function useRoom({
         myPeerId = id;
         myGuestId = id;
         if (!disposed) setMyId(id);
+        dlog('guest:peer-open', { id });
         const conn = p.connect(roomCode, { reliable: true });
         hostConn = conn;
         setCurRole('guest');
@@ -876,12 +987,23 @@ export function useRoom({
         clear(attemptTimer);
         attemptTimer = setTimeout(() => {
           if (conn.open) return;
+          // The connection to the room code never opened. This happens when the
+          // broker still holds a just-released id whose dead holder never answers
+          // — we get neither 'open' nor 'peer-unavailable', so nothing else will
+          // fire. Tear it down and retry unconditionally; previously we only
+          // reconnected if close() threw, so a clean close of a never-opened
+          // connection stranded the peer forever ("still trying to reach the
+          // room" with no recovery). Null out hostConn first so the conn's own
+          // 'close'/'error' handlers no-op and don't double-drive recovery.
           failedAttempts++;
+          dlog('guest:attempt-timeout', { failed: failedAttempts });
+          hostConn = null;
           try {
             conn.close();
           } catch {
-            scheduleReconnect();
+            /* best-effort */
           }
+          scheduleReconnect();
         }, ATTEMPT_TIMEOUT_MS);
 
         conn.on('open', () => {
@@ -891,6 +1013,7 @@ export function useRoom({
           backoff = RECONNECT_BASE_MS;
           failedAttempts = 0;
           if (!disposed) setStatus('pending');
+          dlog('guest:conn-open', { to: roomCode });
           conn.send({ type: 'request-join', name: nameRef.current, handle: myHandle } satisfies PeerMessage);
         });
         conn.on('data', (raw) => handleGuestData(conn, raw));
@@ -907,15 +1030,18 @@ export function useRoom({
           // return. startHostClaim's own retries ride out the broker's TTL on
           // the just-released id.
           if (amPreferred && claimSent) {
+            dlog('guest:conn-close', { next: 'reclaim' });
             stopStallTimer();
             backoff = RECONNECT_BASE_MS;
             attempt();
             return;
           }
+          dlog('guest:conn-close', { next: 'reconnect' });
           scheduleReconnect();
         });
-        conn.on('error', () => {
+        conn.on('error', (err) => {
           if (conn !== hostConn) return;
+          dlog('guest:conn-error', { error: String((err as Error)?.message ?? err) });
           scheduleReconnect();
         });
       });
@@ -933,13 +1059,18 @@ export function useRoom({
         const type = (err as { type?: string }).type;
         if (type === 'peer-unavailable') {
           failedAttempts++;
+          dlog('guest:peer-unavailable', { failed: failedAttempts });
           scheduleReconnect();
           return;
         }
         // A dropped signaling server is recoverable — our connection to the host
         // is independent of the broker, and the `disconnected` handler
         // reconnects. Don't surface a fatal error for a transient blip.
-        if (type && RECOVERABLE_PEER_ERRORS.has(type)) return;
+        if (type && RECOVERABLE_PEER_ERRORS.has(type)) {
+          dlog('guest:peer-error-recoverable', { type });
+          return;
+        }
+        dlog('guest:peer-error-fatal', { type, msg: err.message });
         terminate(err.message);
       });
       p.on('disconnected', () => {
@@ -954,6 +1085,7 @@ export function useRoom({
     };
 
     const terminate = (message: string) => {
+      dlog('terminate', { message });
       stopTimers();
       clear(deferTimer);
       if (!disposed) {
@@ -1140,6 +1272,15 @@ export function useRoom({
 
     // ---- kickoff ---------------------------------------------------------
     amPreferred = isPreferred();
+    dlog('kickoff', {
+      intent,
+      pref: amPreferred,
+      hasHostKey: !!hostKey,
+      hasCrypto: cryptoAvailable(),
+      pinnedPref: pinnedPreferred ? { handle: pinnedPreferred.handle, hasKey: !!pinnedPreferred.pubKey } : null,
+      savedHostRoom: storage.getHost()?.roomCode ?? null,
+      myHandle,
+    });
     const startSession = () => {
       if (!disposed) attempt();
     };
@@ -1147,14 +1288,21 @@ export function useRoom({
     // creator, only when there isn't one yet, only in a secure context). When
     // crypto is unavailable we proceed synchronously on the degraded path.
     if (intent === 'create' && !hostKey && cryptoAvailable()) {
-      createHostKeypair().then((created) => {
-        if (disposed) return;
-        if (created) {
-          hostKey = created;
-          storage.saveHostKey(roomCode, created);
-        }
-        startSession();
-      });
+      createHostKeypair()
+        .then((created) => {
+          if (disposed) return;
+          if (created) {
+            hostKey = created;
+            storage.saveHostKey(roomCode, created);
+          } else {
+            dlog('keypair:null'); // secure context but generation returned null
+          }
+          startSession();
+        })
+        .catch((e) => {
+          dlog('keypair:error', { error: String(e) });
+          if (!disposed) startSession();
+        });
     } else {
       startSession();
     }

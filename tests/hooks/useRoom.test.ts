@@ -12,6 +12,9 @@ const RECONNECT_BASE_MS_GUESS = 2000;
 const HOST_HANDOFF_GRACE_MS_GUESS = 600;
 // At least the hook's RECONNECT_MAX_MS — advancing this lands any backed-off retry.
 const RECONNECT_MAX_MS_GUESS = 30000;
+// Mirror of the hook's ATTEMPT_TIMEOUT_MS (how long a guest waits for its
+// connection to the room code to open before giving up and retrying).
+const ATTEMPT_TIMEOUT_MS_GUESS = 15000;
 
 vi.mock('peerjs', async () => {
   const mod = await import('../helpers/peerMock');
@@ -676,6 +679,31 @@ describe('useRoom — migration', () => {
       expect(claim).toBeDefined();
       expect(claim!.handle).toBe(handle);
       expect(result.current.isPreferredHost).toBe(false); // still reclaiming, not host yet
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // If the connection to the room code never opens — the broker still holds a
+  // just-released id whose dead holder never answers, so there is no 'open' and
+  // no 'peer-unavailable' — the guest must time out and retry, not hang forever.
+  // This silent hang (observed live via the diagnostic log) is what left a
+  // returning host stranded on "still trying to reach the room": the dead lobby.
+  it('retries instead of hanging when the room-code connection never opens', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useRoom({ roomCode: 'ROOM01', playerName: 'Guest', intent: 'join' }),
+      );
+      act(() => lastPeer().fireOpen('GUEST1'));
+      // The connect() to ROOM01 is never opened and never errors (FakeConnection
+      // models a never-opened close as silent). Without the timeout-path fix the
+      // peer sits here indefinitely.
+      const before = peerInstances.length;
+      act(() => vi.advanceTimersByTime(ATTEMPT_TIMEOUT_MS_GUESS + 50));
+      act(() => vi.advanceTimersByTime(RECONNECT_BASE_MS_GUESS + 50));
+      expect(peerInstances.length).toBeGreaterThan(before); // tore down and retried
+      expect(result.current.status).not.toBe('error');
     } finally {
       vi.useRealTimers();
     }

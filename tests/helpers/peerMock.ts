@@ -25,6 +25,8 @@ export class FakeConnection extends Emitter {
   peer: string;
   open = false;
   closed = false;
+  /** True once the connection has ever fired 'open'. */
+  everOpened = false;
   /** Every payload passed to `send`, in order — assert on this in tests. */
   sent: unknown[] = [];
 
@@ -41,7 +43,11 @@ export class FakeConnection extends Emitter {
     if (this.closed) return;
     this.closed = true;
     this.open = false;
-    this.emit('close');
+    // Real PeerJS only notifies 'close' for a connection that actually opened.
+    // A connect() that never established (e.g. the broker still holds a dead id)
+    // emits neither 'open' nor 'close' — the caller hangs unless it times out.
+    // Modelling that is what lets tests reproduce the "stuck forever" hang.
+    if (this.everOpened) this.emit('close');
   }
 
   /** Last message sent, for terse assertions. */
@@ -52,6 +58,7 @@ export class FakeConnection extends Emitter {
   // --- test drivers ---
   fireOpen(): void {
     this.open = true;
+    this.everOpened = true;
     this.emit('open');
   }
   receive(data: unknown): void {
